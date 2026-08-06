@@ -1,20 +1,12 @@
 import React, { useState, useRef, useMemo, useLayoutEffect, useCallback } from 'react';
-import { 
-  CheckCircle2, 
-  Circle, 
-  GitBranchPlus, 
-  ExternalLink, 
-  BookOpen, 
-  Youtube, 
-  GraduationCap, 
-  FileText, 
-  ZoomIn, 
-  ZoomOut, 
-  RotateCcw, 
+import {
+  CheckCircle2,
+  Circle,
+  GitBranchPlus,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
   Maximize2,
-  ChevronDown,
-  ChevronUp,
-  Sparkles,
   Award,
   Scissors,
   PlusCircle,
@@ -558,42 +550,43 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                   transform: `translate(${pn.x - CARD_WIDTH / 2}px, ${pn.y}px)`,
                   width: `${CARD_WIDTH}px`,
                 }}
-                className={`absolute transition-all duration-300 rounded-2xl border-2 p-5 shadow-md cursor-pointer group ${
+                className={`absolute transition-all duration-300 rounded-2xl border p-5 shadow-sm cursor-pointer group ${
                   isCompleted
-                    ? 'bg-emerald-50 border-emerald-500 text-emerald-950 ring-4 ring-emerald-50 hover:border-emerald-600'
-                    : `${getBranchClass(pn.branchIndex)} text-slate-800 hover:shadow-lg`
+                    ? 'bg-emerald-50 border-emerald-400 text-emerald-950 ring-2 ring-emerald-50 hover:border-emerald-500'
+                    : `${getBranchClass(pn.branchIndex)} text-slate-800 hover:shadow-md`
                 }`}
                 onClick={() => onSelectNode(node)}
               >
-                {/* Top Badge Row */}
+                {/* Top Row: level (dot + label) and base-node marker on one side, completion state on the other */}
                 <div className="flex items-center justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-1.5">
-                    {node.isBaseNode && (
-                      <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {language === 'he' ? 'נושא מרכזי' : 'Core Topic'}
-                      </span>
-                    )}
-                    {node.expansionExhausted && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200" title={language === 'he' ? 'לא נמצאו תתי-נושאים חדשים שאינם חופפים לקיימים' : 'No new non-overlapping sub-topics were found'}>
-                        {language === 'he' ? 'סוף נושא' : 'End of Topic'}
-                      </span>
-                    )}
-                    <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
-                      node.level === 'foundation' ? 'bg-sky-50 text-sky-700 border-sky-200' :
-                      node.level === 'core' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
-                      node.level === 'advanced' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                      'bg-teal-50 text-teal-700 border-teal-200'
-                    }`}>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      node.level === 'foundation' ? 'bg-sky-500' :
+                      node.level === 'core' ? 'bg-indigo-500' :
+                      node.level === 'advanced' ? 'bg-purple-500' :
+                      'bg-teal-500'
+                    }`} />
+                    <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide truncate">
                       {node.level === 'foundation' ? (language === 'he' ? 'יסודות' : 'Foundation') :
                        node.level === 'core' ? (language === 'he' ? 'ליבה' : 'Core') :
                        node.level === 'advanced' ? (language === 'he' ? 'מתקדם' : 'Advanced') : (language === 'he' ? 'התמחות' : 'Specialization')}
                     </span>
+                    {node.isBaseNode && (
+                      <Award className="w-3.5 h-3.5 text-indigo-500 shrink-0" aria-label={language === 'he' ? 'נושא מרכזי' : 'Core Topic'}>
+                        <title>{language === 'he' ? 'נושא מרכזי' : 'Core Topic'}</title>
+                      </Award>
+                    )}
+                    {node.expansionExhausted && (
+                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 shrink-0" title={language === 'he' ? 'לא נמצאו תתי-נושאים חדשים שאינם חופפים לקיימים' : 'No new non-overlapping sub-topics were found'}>
+                        {language === 'he' ? 'סוף נושא' : 'End'}
+                      </span>
+                    )}
                   </div>
 
                   {/* Complete Indicator */}
-                  <div className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full ${
-                    isCompleted 
-                      ? 'bg-emerald-500 text-white shadow-sm' 
+                  <div className={`flex items-center gap-1 text-xs font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                    isCompleted
+                      ? 'bg-emerald-500 text-white shadow-sm'
                       : 'bg-slate-100 text-slate-600 border border-slate-200'
                   }`}>
                     {isCompleted ? (
