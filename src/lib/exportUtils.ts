@@ -665,7 +665,6 @@ export async function exportTreeToPdf(
       backgroundColor: '#ffffff',
     });
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -675,22 +674,71 @@ export async function exportTreeToPdf(
     const imgWidth = 210;
     const pageHeight = 297;
     const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let heightLeft = imgHeight;
-    let position = 0;
+    const pxPerMm = canvas.height / imgHeight;
 
-    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
+    // Find every "must not be split" block (node cards, the visual tree map section, etc. - each
+    // marked page-break-inside:avoid in the HTML above) and compute its vertical span in PDF mm
+    // space, the same way link positions are computed below. html2canvas/jsPDF paginate by slicing
+    // one big rasterized image at fixed pageHeight intervals, which ignores CSS page-break rules
+    // entirely and can cut a node card or the tree diagram in half at a page boundary - this
+    // measures real block boundaries so we can choose break points that land between blocks instead.
+    const bodyRect = iframeDoc.body.getBoundingClientRect();
+    const avoidBlocks = Array.from(iframeDoc.body.querySelectorAll('[style*="page-break-inside: avoid"]'));
+    const blockRanges = avoidBlocks
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const top = ((r.top - bodyRect.top) / iframeDoc.body.offsetHeight) * imgHeight;
+        const bottom = ((r.bottom - bodyRect.top) / iframeDoc.body.offsetHeight) * imgHeight;
+        return { top, bottom };
+      })
+      .sort((a, b) => a.top - b.top);
 
-    while (heightLeft > 0) {
-      position = heightLeft - imgHeight;
-      pdf.addPage();
-      pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
+    // Build dynamic page-break points (in mm, along the full document height) that never fall
+    // inside an avoid-block unless that single block is itself taller than a full page.
+    const MIN_PAGE_PROGRESS_MM = 20;
+    const breakpoints: number[] = [0];
+    let cursor = 0;
+    while (cursor < imgHeight - 0.01) {
+      let candidateEnd = Math.min(cursor + pageHeight, imgHeight);
+
+      if (candidateEnd < imgHeight) {
+        const straddling = blockRanges.find(b => b.top < candidateEnd - 0.5 && b.bottom > candidateEnd + 0.5);
+        if (straddling && straddling.top > cursor + MIN_PAGE_PROGRESS_MM) {
+          candidateEnd = straddling.top;
+        }
+      }
+
+      breakpoints.push(candidateEnd);
+      cursor = candidateEnd;
     }
 
-    // Attach clickable link annotations onto the PDF coordinates
+    // Render one PDF page per breakpoint span, cropping the source canvas to that exact slice
+    // instead of overlaying the same full image at a shifted negative offset.
+    for (let i = 0; i < breakpoints.length - 1; i++) {
+      const sliceTopMm = breakpoints[i];
+      const sliceHeightMm = breakpoints[i + 1] - breakpoints[i];
+      if (sliceHeightMm <= 0) continue;
+
+      const sliceTopPx = Math.round(sliceTopMm * pxPerMm);
+      const sliceHeightPx = Math.max(1, Math.min(Math.round(sliceHeightMm * pxPerMm), canvas.height - sliceTopPx));
+
+      const sliceCanvas = document.createElement('canvas');
+      sliceCanvas.width = canvas.width;
+      sliceCanvas.height = sliceHeightPx;
+      const ctx = sliceCanvas.getContext('2d');
+      if (!ctx) continue;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+      ctx.drawImage(canvas, 0, sliceTopPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
+
+      const sliceDataUrl = sliceCanvas.toDataURL('image/jpeg', 0.95);
+      if (i > 0) pdf.addPage();
+      pdf.addImage(sliceDataUrl, 'JPEG', 0, 0, imgWidth, sliceHeightMm);
+    }
+
+    // Attach clickable link annotations onto the PDF coordinates, mapped through the same
+    // dynamic breakpoints used to render the pages above.
     const linkElements = Array.from(iframeDoc.body.querySelectorAll('a[href]'));
-    const bodyRect = iframeDoc.body.getBoundingClientRect();
 
     linkElements.forEach((a) => {
       const href = a.getAttribute('href');
@@ -704,10 +752,11 @@ export async function exportTreeToPdf(
       const pdfX = xRatio * imgWidth;
       const pdfYTotal = yRatio * imgHeight;
 
-      const pageIndex = Math.floor(pdfYTotal / pageHeight);
-      const pdfY = pdfYTotal % pageHeight;
+      let pageIndex = breakpoints.findIndex((bp, idx) => idx < breakpoints.length - 1 && pdfYTotal >= bp && pdfYTotal < breakpoints[idx + 1]);
+      if (pageIndex === -1) pageIndex = breakpoints.length - 2; // fell exactly on the last edge
+      const pdfY = pdfYTotal - breakpoints[pageIndex];
 
-      if (pageIndex < pdf.getNumberOfPages()) {
+      if (pageIndex >= 0 && pageIndex < pdf.getNumberOfPages()) {
         pdf.setPage(pageIndex + 1);
         pdf.link(pdfX, pdfY, Math.max(wRatio * imgWidth, 5), Math.max(hRatio * imgHeight, 3), { url: href });
       }

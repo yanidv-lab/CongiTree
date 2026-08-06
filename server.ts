@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import { MAX_NODE_EXPANSION_DEPTH } from "./src/lib/constants";
 
 dotenv.config();
 
@@ -92,7 +93,6 @@ function sanitizeResourceUrl(rawUrl: string, title: string, topic: string, type:
   const cleanTerm = (title || topic).trim();
   const hasHebrew = /[\u0590-\u05FF]/.test(cleanTerm);
   const titleLower = cleanTerm.toLowerCase();
-  const encodedTerm = encodeURIComponent(cleanTerm.replace(/[^a-zA-Z0-9\u0590-\u05FF\s]/g, "").trim().replace(/\s+/g, '_'));
   const encodedQuery = encodeURIComponent(cleanTerm);
 
   if (type === "youtube") {
@@ -140,16 +140,15 @@ function sanitizeResourceUrl(rawUrl: string, title: string, topic: string, type:
     if (titleLower.includes("scholar")) return `https://scholar.google.com/scholar?q=${encodedQuery}`;
   }
 
-  // Direct Wikipedia article link (Hebrew if Hebrew text, English otherwise)
-  if (encodedTerm) {
-    if (hasHebrew) {
-      return `https://he.wikipedia.org/wiki/${encodedTerm}`;
-    } else {
-      return `https://en.wikipedia.org/wiki/${encodedTerm}`;
-    }
+  // Wikipedia search endpoint as the universal last-resort fallback (Hebrew if Hebrew text, English
+  // otherwise). Unlike guessing a direct "/wiki/<Title>" URL, this never 404s: on an exact title
+  // match Wikipedia auto-redirects straight to the article, and for specific/niche sub-topic titles
+  // that have no dedicated article it still lands the user on genuinely relevant search results
+  // instead of a broken link.
+  if (hasHebrew) {
+    return `https://he.wikipedia.org/w/index.php?search=${encodedQuery}&title=Special:Search&fulltext=1`;
   }
-
-  return "https://ocw.mit.edu/";
+  return `https://en.wikipedia.org/w/index.php?search=${encodedQuery}&title=Special:Search&fulltext=1`;
 }
 
 // Helper to build fallback Learning Tree when AI rate limit / quota is exceeded or unavailable
@@ -566,10 +565,19 @@ app.get("/api/health", (req, res) => {
 
 // Generate Tree Route
 app.post("/api/generate-tree", async (req, res) => {
-  const { topic, language = "he", customInstructions = "" } = req.body;
+  const { topic, language = "he", depthLevel = "comprehensive", customInstructions = "" } = req.body;
   if (!topic || typeof topic !== "string" || !topic.trim()) {
     return res.status(400).json({ error: "נושא הוא שדה חובה" });
   }
+
+  // Node-count & coverage guidance driven by the depthLevel the user picked in the UI
+  // ('basic' | 'comprehensive' | 'mastery') - previously this field was accepted but ignored,
+  // so every generated tree got the same node count regardless of the user's chosen scope.
+  const depthGuidance = depthLevel === "basic"
+    ? "Provide exactly 4 to 5 nodes forming a focused, essential prerequisite tree covering only the most critical must-know concepts. Prioritize breadth of the absolute fundamentals over depth."
+    : depthLevel === "mastery"
+    ? "Provide 8 to 12 nodes forming an in-depth, comprehensive prerequisite tree that thoroughly covers foundation, core, advanced, AND specialization concepts. Explicitly identify and fill every important prerequisite knowledge gap a learner would need to close to reach true mastery-level understanding of the topic - do not stop at a shallow overview."
+    : "Provide 6 to 8 nodes forming a well-rounded prerequisite tree covering foundation, core, and initial advanced concepts.";
 
   try {
     const ai = getGeminiClient();
@@ -579,7 +587,9 @@ Build a comprehensive visual learning pathway tree for the topic: "${topic.trim(
 Language requested: ${language === 'he' ? 'Hebrew (עברית)' : 'English or prompt language'}.
 
 YOUR GOAL:
-Create a complete visual learning tree starting from fundamental prerequisite roots up to advanced modules.
+Create a complete visual learning tree starting from fundamental prerequisite roots up to advanced modules, giving
+the learner a comprehensive, broad picture of everything they still need to learn or complete to bring their
+knowledge of "${topic.trim()}" up to the requested depth level. Requested scope: ${depthGuidance}
 For EACH node in the learning tree, provide a rich, multi-platform collection of 4 to 6 REAL, VERIFIED study resources:
 1. University Web Courses & OpenCourseWare (e.g. Campus IL, Technion, Open University Israel, MIT OpenCourseWare, Harvard Online, Stanford Online, edX, Coursera)
 2. Full University Courses & Playlists on YouTube (e.g. Technion lectures, Hebrew University courses, Harvard CS50, MIT OCW playlists, 3Blue1Brown, FreeCodeCamp, Khan Academy Hebrew)
@@ -655,9 +665,10 @@ Return ONLY a valid JSON object with the following structure (no prose outside J
 }
 
 Instructions:
-- Provide 5 to 8 nodes total forming a clear prerequisite tree.
+- ${depthGuidance}
 - DIRECT & FREE RESOURCES MANDATE: Search Google deeply to find specific courses (e.g. MIT OCW, Coursera, edX free audit, Khan Academy), specific high-value YouTube tutorials/channels (e.g. 3Blue1Brown, freeCodeCamp, CrashCourse, CS50), direct Wikipedia articles (in Hebrew or English), open academic books (OpenStax), and MDN/arXiv docs.
 - EVERY RESOURCE MUST HAVE A DIRECT URL LEADING STRAIGHT TO THE KNOWLEDGE SOURCE (e.g., "https://he.wikipedia.org/wiki/...", "https://ocw.mit.edu/courses/...", "https://www.khanacademy.org/...", "https://www.youtube.com/watch?v=...").
+- IF YOU ARE NOT CONFIDENT A SPECIFIC URL IS CORRECT AND CURRENTLY VALID, LEAVE "url" AS AN EMPTY STRING ("") INSTEAD OF GUESSING. The server automatically supplies a reliable, working fallback link (a targeted search page on the right platform) whenever "url" is empty - a confidently wrong/broken link is worse for the learner than an empty one.
 - STRICTLY FORBIDDEN: Do NOT return generic homepage or search URLs (such as google.com/search or generic landing pages).
 - DIVERSITY OF SOURCES: Every node MUST include at least 1 University/MOOC course, 1 YouTube video/channel, 1 Book/eBook, and 1 Article/PDF/Doc.
 - CRITICAL RULE ON TOPICS: Avoid duplicate or highly overlapping nodes. If there are topics that collide, merge them into a single comprehensive node.
@@ -764,8 +775,10 @@ app.post("/api/expand-node", async (req, res) => {
     return res.status(400).json({ error: "פרטי הנושא והצומת חסרים" });
   }
 
-  // Cap expansion at max depth level 3
-  if (nodeDepth >= 3) {
+  // Hard safety ceiling only (bounds cost / prevents runaway trees) - deliberately generous so it
+  // doesn't block expansion attempts in advance at shallow depths. Normal stopping happens earlier,
+  // organically, once the anti-repetition rules below determine there's nothing distinct left to add.
+  if (nodeDepth >= MAX_NODE_EXPANSION_DEPTH) {
     return res.json({
       success: true,
       isEndOfTopic: true,
@@ -789,7 +802,7 @@ We are building a structured learning pathway tree for the general subject: "${t
 The user wants to EXPAND the following node:
 Node Title: "${nodeTitle}"
 Node Description: "${nodeDescription}"
-Current Hierarchy Depth: Level ${nodeDepth} out of 3.
+Current Hierarchy Depth: Level ${nodeDepth} out of ${MAX_NODE_EXPANSION_DEPTH}.
 Ancestor Hierarchy Chain: ${ancestorChain.length > 0 ? ancestorChain.map(a => `"${a}"`).join(' -> ') : 'Root Topic'}
 
 CRITICAL STRICT ANTI-REPETITION & ANTI-LOOP RULES:
@@ -840,6 +853,7 @@ Instructions:
 - COMPREHENSIVE YOUTUBE UNIVERSITY SEARCH: Actively search YouTube for full university course playlists and video series from Technion, Hebrew U, MIT OCW, Harvard CS50, Stanford, and top educational channels relevant to "${nodeTitle}".
 - DIRECT & FREE RESOURCES MANDATE: Use Google Search to deeply search for actual study courses (Campus IL, Khan Academy, MIT OCW, Coursera, edX free audit), specific high-quality YouTube educational videos, direct Wikipedia articles, open textbooks (OpenStax), and MDN/arXiv papers.
 - YOU MUST return the direct URL leading straight to the specific resource page (e.g., "https://he.wikipedia.org/wiki/...", "https://ocw.mit.edu/courses/...", "https://www.khanacademy.org/...", "https://www.youtube.com/watch?v=...").
+- IF YOU ARE NOT CONFIDENT A SPECIFIC URL IS CORRECT AND CURRENTLY VALID, LEAVE "url" AS AN EMPTY STRING ("") INSTEAD OF GUESSING. The server automatically supplies a reliable, working fallback link whenever "url" is empty - a confidently wrong/broken link is worse for the learner than an empty one.
 - STRICTLY FORBIDDEN: Do NOT return generic homepage or search URLs.
 - Make sure each subnode is strictly relevant to "${nodeTitle}" within the overarching context of "${treeTopic}".
 - Provide 3-5 checklist items and 2-4 highly reputable, verified resources per subnode.`;

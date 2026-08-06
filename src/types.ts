@@ -33,6 +33,8 @@ export interface TreeNode {
   completed: boolean; // Computed: true if all items AND resources in this node are completed
   notes?: string;
   expanded?: boolean;
+  // Set once a real AI expansion attempt (+ dedup check) confirms no distinct new sub-topics remain.
+  expansionExhausted?: boolean;
 }
 
 export interface LearningTree {

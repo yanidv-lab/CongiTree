@@ -281,18 +281,45 @@ export default function App() {
     }
   };
 
+  // Mark a node as having no more distinct sub-topics left to expand into
+  const markExpansionExhausted = (nodeId: string) => {
+    updateCurrentTree(tree => {
+      const node = tree.nodes[nodeId];
+      if (!node) return tree;
+      return {
+        ...tree,
+        nodes: {
+          ...tree.nodes,
+          [nodeId]: { ...node, expansionExhausted: true },
+        },
+      };
+    });
+  };
+
   // Expand Node API Call
   const handleExpandNode = async (node: TreeNode) => {
     if (!currentTree) return;
 
-    // Check max depth to prevent infinite loops
+    // A prior attempt already confirmed there's nothing distinct left to add - no need to ask again.
+    if (node.expansionExhausted) {
+      showToast(
+        language === 'he'
+          ? `סוף נושא! לא נמצאו תתי-נושאים חדשים וייחודיים לענף "${node.title}".`
+          : `End of topic! No new, distinct sub-topics were found for "${node.title}".`
+      );
+      return;
+    }
+
+    // Hard safety ceiling only - not meant to trigger in normal use. Real stopping happens
+    // once a real attempt (below) confirms there's nothing distinct left to add.
     const nodeDepth = getNodeDepth(currentTree, node.id);
     if (nodeDepth >= MAX_NODE_EXPANSION_DEPTH) {
       showToast(
         language === 'he'
-          ? `סוף נושא! הענף "${node.title}" הגיע לעומק הלמידה המרבי. ענף זה מפורט ברמה מרבית נדרשת (נמנעה כפילות בלתי פוסקת).`
-          : `End of topic! "${node.title}" reached maximum depth level (${nodeDepth}). Expansion stopped to prevent infinite duplicate loops.`
+          ? `סוף נושא! הענף "${node.title}" הגיע לעומק המרבי המותר (${MAX_NODE_EXPANSION_DEPTH}).`
+          : `End of topic! "${node.title}" reached the maximum allowed depth (${MAX_NODE_EXPANSION_DEPTH}).`
       );
+      markExpansionExhausted(node.id);
       return;
     }
 
@@ -326,6 +353,7 @@ export default function App() {
       }
 
       if (data.isEndOfTopic || !data.subNodes || data.subNodes.length === 0) {
+        markExpansionExhausted(node.id);
         showToast(
           language === 'he'
             ? `סוף נושא! הענף "${node.title}" מפורט ברמה מרבית ולא נמצאו תתי-נושאים חדשים (נמנעה כפילות).`
@@ -338,11 +366,12 @@ export default function App() {
       const existingTitles = (Object.values(currentTree.nodes) as TreeNode[]).map(n => n.title);
 
       // Filter out candidates similar to existing tree nodes
-      const uniqueCandidates = candidateSubNodes.filter(cand => 
+      const uniqueCandidates = candidateSubNodes.filter(cand =>
         !existingTitles.some(ex => areTitlesDuplicateOrSimilar(cand.title, ex))
       );
 
       if (uniqueCandidates.length === 0) {
+        markExpansionExhausted(node.id);
         showToast(
           language === 'he'
             ? `סוף נושא! כל הענפים שהוצעו כבר קיימים בעץ הלמידה (נמנעו כפילויות).`
@@ -408,16 +437,19 @@ export default function App() {
         const nextNodes = { ...tree.nodes };
         const newChildIds: string[] = [...(nextNodes[parent.id]?.childrenIds || [])];
 
-        const existingTitles = new Set(Object.values(nextNodes).map((n: any) => n.title.toLowerCase().trim()));
+        // Use the same fuzzy near-duplicate check as everywhere else in the app (client dedup,
+        // server dedup, custom sub-branch add) instead of a raw exact-string match, so two
+        // differently-worded but overlapping approved branches can't both slip into the tree.
+        const existingTitlesList: string[] = Object.values(nextNodes).map((n: any) => n.title);
         let addedCount = 0;
 
         approvedNodes.forEach(sub => {
-          if (!existingTitles.has(sub.title.toLowerCase().trim())) {
+          if (!existingTitlesList.some(ex => areTitlesDuplicateOrSimilar(sub.title, ex))) {
             nextNodes[sub.id] = sub;
             if (!newChildIds.includes(sub.id)) {
               newChildIds.push(sub.id);
             }
-            existingTitles.add(sub.title.toLowerCase().trim());
+            existingTitlesList.push(sub.title);
             addedCount++;
           }
         });
@@ -467,7 +499,7 @@ export default function App() {
   const handlePromoteNodeToTree = (node: TreeNode) => {
     if (!currentTree) return;
     try {
-      const promotedTree = promoteNodeToIndependentTree(currentTree, node.id);
+      const promotedTree = promoteNodeToIndependentTree(currentTree, node.id, language);
 
       const nextSaved = [promotedTree, ...savedTrees];
       setSavedTrees(nextSaved);
@@ -662,16 +694,16 @@ export default function App() {
         {/* Empty State when no trees exist */}
         {!currentTree ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-lg mx-auto">
-            <div className="w-16 h-16 rounded-3xl bg-indigo-50 border border-indigo-100 text-indigo-700 flex items-center justify-center mb-4 shadow-sm">
-              <GitFork className="w-8 h-8 rotate-90" />
+            <div className="w-20 h-20 rounded-3xl bg-linear-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center mb-5 shadow-lg shadow-indigo-200">
+              <GitFork className="w-9 h-9 rotate-90" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">{language === 'he' ? 'ברוך הבא ל-CogniTree AI' : 'Welcome to CogniTree AI'}</h2>
-            <p className="text-xs text-slate-600 mb-6 leading-relaxed">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">{language === 'he' ? 'ברוך הבא ל-CogniTree AI' : 'Welcome to CogniTree AI'}</h2>
+            <p className="text-sm text-slate-600 mb-7 leading-relaxed max-w-sm">
               {language === 'he' ? 'מערכת חכמה הבונה עצי למידה ויזואליים, מבוססי מקורות מחקריים מאומתים, עם מעקב ירוק/אפור בזמן אמת.' : 'A smart system that builds visual learning trees based on verified sources, with real-time green/gray tracking.'}
             </p>
             <button
               onClick={() => setIsNewModalOpen(true)}
-              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-md transition-all hover:scale-105 active:scale-95"
+              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
             >
               <Plus className="w-5 h-5 stroke-[3]" />
               <span>{language === 'he' ? 'צור את עץ הלמידה הראשון שלך' : 'Create your first learning tree'}</span>
