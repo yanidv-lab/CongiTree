@@ -200,11 +200,18 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
             <div className="flex items-center gap-2 pt-1 flex-wrap">
               <button
                 onClick={() => onExpandNode(node)}
-                disabled={isLoadingExpand}
+                disabled={isLoadingExpand || node.expansionExhausted}
                 className="flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all active:scale-95 disabled:opacity-50 shadow-sm"
+                title={node.expansionExhausted ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand') : undefined}
               >
                 <GitBranchPlus className="w-4 h-4" />
-                <span>{isLoadingExpand ? (language === 'he' ? 'מרחיב ענפים...' : 'Expanding...') : (language === 'he' ? 'הרחבה חכמה עם AI' : 'Smart AI Expansion')}</span>
+                <span>
+                  {isLoadingExpand
+                    ? (language === 'he' ? 'מרחיב ענפים...' : 'Expanding...')
+                    : node.expansionExhausted
+                    ? (language === 'he' ? 'סוף נושא - אין עוד תתי-נושאים' : 'End of Topic - No More Sub-Topics')
+                    : (language === 'he' ? 'הרחבה חכמה עם AI' : 'Smart AI Expansion')}
+                </span>
               </button>
 
               {onOpenCustomBranchModal && (

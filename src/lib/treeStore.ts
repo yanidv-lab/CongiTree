@@ -1,5 +1,8 @@
 import { LearningTree, TreeNode } from '../types';
 import { SAMPLE_TREES } from '../data/sampleTrees';
+import { MAX_NODE_EXPANSION_DEPTH } from './constants';
+
+export { MAX_NODE_EXPANSION_DEPTH };
 
 const STORAGE_KEY_TREES = 'learningtree_ai_saved_trees';
 const STORAGE_KEY_ACTIVE_ID = 'learningtree_ai_active_tree_id';
@@ -116,8 +119,6 @@ export function getNodeDepth(tree: LearningTree, nodeId: string): number {
   }
   return depth;
 }
-
-export const MAX_NODE_EXPANSION_DEPTH = 3;
 
 // Get full list of ancestor nodes for a node
 export function getNodeAncestors(tree: LearningTree, nodeId: string): TreeNode[] {

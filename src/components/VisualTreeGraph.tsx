@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useLayoutEffect, useCallback } from 'react';
 import { 
   CheckCircle2, 
   Circle, 
@@ -21,7 +21,6 @@ import {
   FolderPlus
 } from 'lucide-react';
 import { LearningTree, TreeNode } from '../types';
-import { MAX_NODE_EXPANSION_DEPTH } from '../lib/treeStore';
 import { ConfirmModal } from './ConfirmModal';
 
 interface VisualTreeGraphProps {
@@ -78,6 +77,15 @@ const getBranchClass = (idx?: number) => {
   return BRANCH_BG_CLASSES[idx % BRANCH_BG_CLASSES.length];
 };
 
+// Single source of truth for card width: used both by the layout algorithm (column spacing)
+// and by the actual rendered card (inline style + centering translate), so columns are spaced
+// based on the card's real footprint instead of a mismatched estimate.
+const CARD_WIDTH = 320;
+// Fallback connector height used only until a card's real height has been measured (first paint).
+const DEFAULT_CARD_HEIGHT = 190;
+// Small visual gap so the connector line doesn't touch the card border pixel-for-pixel.
+const CONNECTOR_GAP = 6;
+
 export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
   tree,
   onSelectNode,
@@ -106,7 +114,7 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
     if (!rootId || !nodes[rootId]) return [];
 
     const Y_SPACING = 300; // Increased vertical gap for more tree-like look
-    const NODE_WIDTH = 340; // Card width estimate
+    const NODE_WIDTH = CARD_WIDTH; // Match the actually rendered card width for precise column spacing
     const X_GAP = 80; // Horizontal gap
 
     // Step 1: Build a hierarchical structure to compute subtree widths
@@ -205,6 +213,43 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
 
     return result;
   }, [tree]);
+
+  // Measure each card's real rendered height, so connector lines can start/end exactly at each
+  // card's actual bottom/top edge instead of a fixed guess (cards vary in height depending on
+  // badges, description length, and how many checklist/resource items they have).
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const [cardHeights, setCardHeights] = useState<Map<string, number>>(new Map());
+
+  const setCardRef = useCallback((nodeId: string, el: HTMLDivElement | null) => {
+    if (el) {
+      cardRefs.current.set(nodeId, el);
+    } else {
+      cardRefs.current.delete(nodeId);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    const measure = () => {
+      setCardHeights(prev => {
+        let changed = false;
+        const next = new Map(prev);
+        cardRefs.current.forEach((el, id) => {
+          const h = el.offsetHeight;
+          if (h > 0 && next.get(id) !== h) {
+            next.set(id, h);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    measure();
+
+    const observer = new ResizeObserver(measure);
+    cardRefs.current.forEach(el => observer.observe(el));
+    return () => observer.disconnect();
+  }, [positionedNodes]);
 
   const touchStartRef = useRef<{ distance: number; panX: number; panY: number; zoom: number; touches: {x: number; y: number}[] } | null>(null);
 
@@ -440,11 +485,13 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
             const parentPn = nodePosMap.get(pn.node.parentId);
             if (!parentPn) return null;
 
-            // Compute connection line coordinates
+            // Compute connection line coordinates using each card's real measured height,
+            // so the line meets the parent's actual bottom edge and the child's actual top edge.
+            const parentHeight = cardHeights.get(parentPn.node.id) ?? DEFAULT_CARD_HEIGHT;
             const startX = parentPn.x;
-            const startY = parentPn.y + 140; // Roughly bottom center of parent card
+            const startY = parentPn.y + parentHeight + CONNECTOR_GAP;
             const endX = pn.x;
-            const endY = pn.y - 10; // Slightly above the top of child card
+            const endY = pn.y - CONNECTOR_GAP;
 
             // Curve calculation (vertical S-curve)
             const controlY1 = startY + (endY - startY) * 0.4;
@@ -506,9 +553,10 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
             return (
               <div
                 key={node.id}
+                ref={(el) => setCardRef(node.id, el)}
                 style={{
-                  transform: `translate(${pn.x - 160}px, ${pn.y}px)`,
-                  width: '320px',
+                  transform: `translate(${pn.x - CARD_WIDTH / 2}px, ${pn.y}px)`,
+                  width: `${CARD_WIDTH}px`,
                 }}
                 className={`absolute transition-all duration-300 rounded-2xl border-2 p-5 shadow-md cursor-pointer group ${
                   isCompleted
@@ -525,8 +573,8 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                         {language === 'he' ? 'נושא מרכזי' : 'Core Topic'}
                       </span>
                     )}
-                    {pn.depth >= MAX_NODE_EXPANSION_DEPTH && (
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200" title={language === 'he' ? 'הגעת לעומק המרבי - סוף נושא' : 'Reached maximum depth - end of topic'}>
+                    {node.expansionExhausted && (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 border border-amber-200" title={language === 'he' ? 'לא נמצאו תתי-נושאים חדשים שאינם חופפים לקיימים' : 'No new non-overlapping sub-topics were found'}>
                         {language === 'he' ? 'סוף נושא' : 'End of Topic'}
                       </span>
                     )}
@@ -640,14 +688,20 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                       e.stopPropagation();
                       onExpandNode(node);
                     }}
-                    disabled={isExpanding}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-50"
-                    title={language === 'he' ? "הרחב נושא זה בענפים נוספים עם AI" : "Expand this topic with AI"}
+                    disabled={isExpanding || node.expansionExhausted}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100"
+                    title={
+                      node.expansionExhausted
+                        ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand')
+                        : (language === 'he' ? "הרחב נושא זה בענפים נוספים עם AI" : "Expand this topic with AI")
+                    }
                   >
                     <GitBranchPlus className="w-3.5 h-3.5" />
                     <span>
                       {isExpanding && expandingNodeId === node.id
                         ? (language === 'he' ? 'מרחיב...' : 'Expanding...')
+                        : node.expansionExhausted
+                        ? (language === 'he' ? 'סוף נושא' : 'End of Topic')
                         : (language === 'he' ? '+ הרחב ענף' : '+ Expand')}
                     </span>
                   </button>
