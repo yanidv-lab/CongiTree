@@ -3,14 +3,42 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
+import rateLimit from "express-rate-limit";
 import { MAX_NODE_EXPANSION_DEPTH } from "./src/lib/constants";
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+// Cloud Run (and most container platforms) inject PORT and require the app to listen on it;
+// default to 3000 for local dev where nothing sets it.
+const PORT = Number(process.env.PORT) || 3000;
+
+// Trust the platform's reverse proxy (Cloud Run, etc.) so req.ip reflects the real client IP
+// from X-Forwarded-For rather than the proxy's own address - required for per-IP rate limiting
+// below to actually distinguish clients instead of lumping all traffic together.
+app.set("trust proxy", 1);
 
 app.use(express.json());
+
+// There is no user auth in this app, so these two routes (the ones that call the Gemini API)
+// are reachable by anyone who has the URL. Rate limit them per-IP as a baseline cost/abuse
+// guard - this is not a substitute for real auth on a widely-shared public deployment, but it
+// bounds the worst case for casual abuse or a runaway client bug.
+const generateTreeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "יותר מדי בקשות ליצירת עצי למידה. נסה שוב בעוד כמה דקות." },
+});
+
+const expandNodeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "יותר מדי בקשות להרחבת ענפים. נסה שוב בעוד כמה דקות." },
+});
 
 // Initialize Gemini Client safely on the server
 function getGeminiClient() {
@@ -564,7 +592,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // Generate Tree Route
-app.post("/api/generate-tree", async (req, res) => {
+app.post("/api/generate-tree", generateTreeLimiter, async (req, res) => {
   const { topic, language = "he", depthLevel = "comprehensive", customInstructions = "" } = req.body;
   if (!topic || typeof topic !== "string" || !topic.trim()) {
     return res.status(400).json({ error: "נושא הוא שדה חובה" });
@@ -769,7 +797,7 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
 });
 
 // Expand Node Route - Creates sub-branches under a chosen node
-app.post("/api/expand-node", async (req, res) => {
+app.post("/api/expand-node", expandNodeLimiter, async (req, res) => {
   const { treeTopic, nodeId, nodeTitle, nodeDescription, nodeDepth = 0, ancestors = [], existingTreeContext = "", language = "he" } = req.body;
   if (!treeTopic || !nodeId || !nodeTitle) {
     return res.status(400).json({ error: "פרטי הנושא והצומת חסרים" });
