@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { KeyRound, Eye, EyeOff, ShieldCheck, Check, AlertCircle, Trash2, X, ExternalLink, Loader2 } from 'lucide-react';
-import { getStoredApiKey, setStoredApiKey, clearStoredApiKey, validateApiKey } from '../lib/apiKeyStore';
+import {
+  getStoredApiKey,
+  setStoredApiKey,
+  clearStoredApiKey,
+  validateApiKey,
+  getStoredProvider,
+  setStoredProvider,
+  PROVIDER_INFO,
+  LlmProvider,
+} from '../lib/apiKeyStore';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -9,7 +18,10 @@ interface SettingsModalProps {
   language: 'he' | 'en';
 }
 
+const PROVIDERS: LlmProvider[] = ['gemini', 'openai', 'anthropic'];
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onKeySaved, language }) => {
+  const [provider, setProvider] = useState<LlmProvider>('gemini');
   const [apiKey, setApiKey] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
@@ -17,14 +29,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
 
   useEffect(() => {
     if (isOpen) {
-      loadKey();
+      loadProviderAndKey();
     }
   }, [isOpen]);
 
-  const loadKey = async () => {
-    const key = await getStoredApiKey();
+  const loadProviderAndKey = async () => {
+    const storedProvider = await getStoredProvider();
+    setProvider(storedProvider);
+    const key = await getStoredApiKey(storedProvider);
     setApiKey(key);
     setStatusMessage(null);
+  };
+
+  const handleProviderChange = async (nextProvider: LlmProvider) => {
+    setProvider(nextProvider);
+    setStatusMessage(null);
+    const key = await getStoredApiKey(nextProvider);
+    setApiKey(key);
   };
 
   const t = (he: string, en: string) => (language === 'he' ? he : en);
@@ -36,13 +57,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     }
 
     setIsValidating(true);
-    setStatusMessage({ type: 'info', text: t('מאמת מפתח מול שרתי Google Gemini...', 'Validating key against Google Gemini servers...') });
+    setStatusMessage({
+      type: 'info',
+      text: t(`מאמת מפתח מול שרתי ${PROVIDER_INFO[provider].label}...`, `Validating key against ${PROVIDER_INFO[provider].label} servers...`),
+    });
 
-    const result = await validateApiKey(apiKey);
+    const result = await validateApiKey(apiKey, provider);
     setIsValidating(false);
 
     if (result.valid) {
-      await setStoredApiKey(apiKey);
+      await setStoredApiKey(apiKey, provider);
+      await setStoredProvider(provider);
       setStatusMessage({ type: 'success', text: t('מפתח ה-API נאמת ונשמר בהצלחה במכשיר!', 'API key validated and saved to this device!') });
       if (onKeySaved) onKeySaved();
       setTimeout(() => {
@@ -54,13 +79,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
   };
 
   const handleClear = async () => {
-    await clearStoredApiKey();
+    await clearStoredApiKey(provider);
     setApiKey('');
     setStatusMessage({ type: 'info', text: t('מפתח ה-API נמחק בהצלחה מהמכשיר.', 'API key removed from this device.') });
     if (onKeySaved) onKeySaved();
   };
 
   if (!isOpen) return null;
+
+  const info = PROVIDER_INFO[provider];
 
   return (
     <div
@@ -78,7 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
               <KeyRound className="w-4.5 h-4.5" strokeWidth={2.75} />
             </div>
             <div className="min-w-0">
-              <h2 className="font-heading text-base text-ink">{t('הגדרות מפתח Gemini API', 'Gemini API Key Settings')}</h2>
+              <h2 className="font-heading text-base text-ink">{t('הגדרות מפתח AI', 'AI Provider Settings')}</h2>
               <p className="text-xs text-ink/55">{t('אבטחה וחיבור ישיר למודל AI', 'Secure, direct connection to the AI model')}</p>
             </div>
           </div>
@@ -100,23 +127,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
                 {t('אבטחה מלאה ללא דליפות', 'Fully secure, no leaks')}
               </strong>
               {t(
-                'מפתח ה-API שלך נשמר בצורה מוצפנת ומקומית בלבד במכשיר שלך. כל הפניות נשלחות ישירות מהמכשיר לשרתי Google הרשמיים בלבד (generativelanguage.googleapis.com).',
-                'Your API key is stored locally and securely on this device only. Requests go directly from your device to Google’s official servers (generativelanguage.googleapis.com).'
+                'מפתח ה-API שלך נשמר בצורה מוצפנת ומקומית בלבד במכשיר שלך. כל הפניות נשלחות ישירות מהמכשיר לשרתי הספק שבחרת בלבד.',
+                'Your API key is stored locally and securely on this device only. Requests go directly from your device to your chosen provider’s official servers only.'
               )}
+            </div>
+          </div>
+
+          {/* Provider Picker */}
+          <div className="field">
+            <label className="block text-xs font-semibold text-ink/70 mb-2">
+              {t('ספק מודל AI', 'AI Provider')}
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {PROVIDERS.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => handleProviderChange(p)}
+                  className={`px-3 py-2.5 rounded-panel text-xs font-semibold border transition-all ${
+                    provider === p
+                      ? 'bg-accent text-paper border-accent'
+                      : 'bg-panel/40 text-ink/70 border-ink/15 hover:border-accent/50'
+                  }`}
+                >
+                  {PROVIDER_INFO[p].label}
+                </button>
+              ))}
             </div>
           </div>
 
           {/* API Key Input */}
           <div className="field">
             <label className="block text-xs font-semibold text-ink/70 mb-2">
-              {t('מפתח Gemini API (של Google AI Studio)', 'Gemini API Key (from Google AI Studio)')}
+              {t(`מפתח ${info.label} API`, `${info.label} API Key`)}
             </label>
             <div className="relative">
               <input
                 type={showKey ? 'text' : 'password'}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="AIzaSy..."
+                placeholder={info.keyPlaceholder}
                 dir="ltr"
                 className={`w-full bg-panel/40 border border-ink/15 rounded-full px-4 py-3 text-sm font-mono text-ink placeholder-ink/35 focus:outline-none focus:border-accent transition-all ${
                   language === 'he' ? 'pl-11' : 'pr-11'
@@ -156,12 +206,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
           <div className="text-xs text-ink/55 flex items-center justify-between gap-2 flex-wrap">
             <span>{t('אין לך מפתח API עדיין?', 'Don’t have an API key yet?')}</span>
             <a
-              href="https://aistudio.google.com/app/apikey"
+              href={info.getKeyUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="text-accent-700 hover:text-accent-800 font-semibold inline-flex items-center gap-1 hover:underline"
             >
-              {t('הפק מפתח בחינם ב-Google AI Studio', 'Get a free key from Google AI Studio')}
+              {t(info.getKeyLabel.he, info.getKeyLabel.en)}
               <ExternalLink className="w-3 h-3" strokeWidth={2.5} />
             </a>
           </div>

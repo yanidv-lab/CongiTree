@@ -110,7 +110,7 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
     onAddResource(node.id, {
       title: resTitle.trim(),
       url: resUrl.trim() || `https://www.google.com/search?q=${encodeURIComponent(resTitle)}`,
-      provider: resProvider.trim() || 'מקור מותאם',
+      provider: resProvider.trim() || (language === 'he' ? 'מקור מותאם' : 'Custom Source'),
       type: resType,
       description: resDesc.trim(),
       isVerifiedAcademic: true,

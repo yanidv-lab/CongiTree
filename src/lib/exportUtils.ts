@@ -18,6 +18,12 @@ export async function exportTreeToImage(
       quality: 0.95,
       pixelRatio: 2,
       backgroundColor: '#020617', // slate-950
+      // Skip web-font embedding entirely: html-to-image tries to read .cssRules off every
+      // stylesheet on the page to inline font-face declarations, and browsers always throw a
+      // SecurityError doing that for the cross-origin Google Fonts <link> in index.html (it has
+      // no crossorigin attribute) - the UI already renders with those fonts, so re-embedding them
+      // into the exported bitmap isn't needed.
+      skipFonts: true,
     });
 
     const link = document.createElement('a');
@@ -248,11 +254,18 @@ export async function exportTreeToPdf(
   const liveGraphCanvas = document.getElementById('visual_tree_graph_canvas');
   if (liveGraphCanvas) {
     try {
-      liveGraphDataUrl = await toPng(liveGraphCanvas, {
-        quality: 0.95,
-        pixelRatio: 2,
-        backgroundColor: '#f8fafc',
-      });
+      // Race against a timeout so a slow/failing font read (see skipFonts note above) can never
+      // hang the whole PDF export - the vector SVG tree diagram below covers the same content
+      // and needs no snapshot at all if this step doesn't finish in time.
+      liveGraphDataUrl = await Promise.race([
+        toPng(liveGraphCanvas, {
+          quality: 0.95,
+          pixelRatio: 2,
+          backgroundColor: '#f8fafc',
+          skipFonts: true,
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+      ]);
     } catch (err) {
       console.warn('Live graph canvas snapshot skipped:', err);
     }

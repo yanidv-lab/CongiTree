@@ -14,7 +14,7 @@ import {
   MAX_NODE_EXPANSION_DEPTH
 } from './lib/treeStore';
 import { exportTreeToImage, exportTreeToJson, exportTreeToPdf } from './lib/exportUtils';
-import { generateLearningTreeClient, expandTreeNodeClient } from './lib/geminiClient';
+import { generateLearningTreeClient, expandTreeNodeClient } from './lib/llmClient';
 import { LearningTree, TreeNode, Resource } from './types';
 import { Header } from './components/Header';
 import { VisualTreeGraph } from './components/VisualTreeGraph';
@@ -35,8 +35,33 @@ import {
   Bookmark, 
   Download, 
   Loader2, 
-  AlertCircle 
+  AlertCircle
 } from 'lucide-react';
+
+// Turns a server/client fallbackReason code into a user-facing explanation of why a lower-quality
+// fallback tree/branch was substituted, so a rate limit or auth problem doesn't just look like the
+// AI silently deciding a topic is trivial or fully covered.
+function fallbackReasonMessage(reason: string, language: 'he' | 'en'): string {
+  const isHe = language === 'he';
+  switch (reason) {
+    case 'rate_limit':
+      return isHe
+        ? 'מפתח ה-API הגיע למגבלת השימוש (Rate Limit / Quota) של Gemini. מוצג תוכן בסיסי במקום. נסה שוב בעוד כמה דקות.'
+        : "The Gemini API key hit its usage limit (rate limit / quota). Showing basic fallback content instead - try again in a few minutes.";
+    case 'auth_error':
+      return isHe
+        ? 'מפתח ה-API אינו תקין או שאין לו הרשאה. בדוק את המפתח בהגדרות. מוצג תוכן בסיסי במקום.'
+        : 'The API key is invalid or unauthorized. Check your key in Settings. Showing basic fallback content instead.';
+    case 'parse_error':
+      return isHe
+        ? 'לא התקבלה תגובה תקינה מהבינה המלאכותית. מוצג תוכן בסיסי במקום.'
+        : "Didn't get a valid response from the AI. Showing basic fallback content instead.";
+    default:
+      return isHe
+        ? 'אירעה שגיאה בפנייה לבינה המלאכותית. מוצג תוכן בסיסי במקום.'
+        : 'Something went wrong contacting the AI. Showing basic fallback content instead.';
+  }
+}
 
 export default function App() {
   const [savedTrees, setSavedTrees] = useState<LearningTree[]>([]);
@@ -48,6 +73,7 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isNewModalOpen, setIsNewModalOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
 
   // Staging & Custom Branch Modals State
   const [stagingBranchApproval, setStagingBranchApproval] = useState<{
@@ -247,6 +273,7 @@ export default function App() {
 
     try {
       let rawTree: LearningTree;
+      let fallbackReason: string | undefined;
 
       try {
         const response = await fetch('/api/generate-tree', {
@@ -263,15 +290,17 @@ export default function App() {
         const data = await response.json();
 
         if (!response.ok || !data.success || !data.tree) {
-          throw new Error(data.error || 'נכשלה יצירת עץ הלמידה');
+          throw new Error(data.error || (language === 'he' ? 'נכשלה יצירת עץ הלמידה' : 'Failed to generate learning tree'));
         }
 
         rawTree = updateTreeCompletionStatus(data.tree);
+        if (data.isFallback) fallbackReason = data.fallbackReason;
       } catch (serverErr) {
         // No reachable backend (e.g. a standalone Android build with no bundled server) -
         // fall back to calling Gemini directly from the device with the user's stored key.
         const clientResult = await generateLearningTreeClient({ topic, language, depthLevel, customInstructions });
         rawTree = updateTreeCompletionStatus(clientResult.tree);
+        if (clientResult.isFallback) fallbackReason = clientResult.fallbackReason;
       }
 
       const subNodesList = Object.values(rawTree.nodes).filter(n => n.id !== rawTree.rootNodeId);
@@ -286,18 +315,25 @@ export default function App() {
         rawNewTree: rawTree,
       });
 
+      // The AI request didn't actually succeed (quota/rate limit/auth/parse issue) and a generic
+      // fallback tree was substituted - tell the user explicitly instead of letting them think
+      // this basic tree IS the real AI-researched result.
+      if (fallbackReason) {
+        showToast(fallbackReasonMessage(fallbackReason, language));
+      }
+
     } catch (err: any) {
       console.error('Error generating tree:', err);
-      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+      if (err?.message === 'API_KEY_MISSING') {
         setIsNewModalOpen(false);
         setIsSettingsOpen(true);
         showToast(
           language === 'he'
-            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח Gemini API כדי להמשיך'
-            : 'App is running in standalone mode - please enter a Gemini API key to continue'
+            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח API כדי להמשיך'
+            : 'App is running in standalone mode - please enter an API key to continue'
         );
       } else {
-        setErrorMessage(err.message || 'שגיאה בחיבור לשרת יצירת עץ הלמידה');
+        setErrorMessage(err.message || (language === 'he' ? 'שגיאה בחיבור לשרת יצירת עץ הלמידה' : 'Error connecting to the tree-generation server'));
       }
     } finally {
       setIsGenerating(false);
@@ -375,12 +411,20 @@ export default function App() {
         data = await response.json();
 
         if (!response.ok || !data.success) {
-          throw new Error(data.error || 'נכשלה הרחבת הענף');
+          throw new Error(data.error || (language === 'he' ? 'נכשלה הרחבת הענף' : 'Failed to expand branch'));
         }
       } catch (serverErr) {
         // No reachable backend (e.g. a standalone Android build with no bundled server) -
         // fall back to calling Gemini directly from the device with the user's stored key.
         data = await expandTreeNodeClient(expandPayload);
+      }
+
+      // A transient API/parse failure with no fallback content to show - this is NOT a real
+      // "nothing left to expand" result, so don't mark the node exhausted (that would
+      // permanently block retrying); just tell the user what happened and let them try again.
+      if (data.isFallback && (!data.subNodes || data.subNodes.length === 0)) {
+        showToast(fallbackReasonMessage(data.fallbackReason, language));
+        return;
       }
 
       if (data.isEndOfTopic || !data.subNodes || data.subNodes.length === 0) {
@@ -418,17 +462,23 @@ export default function App() {
         isNewTree: false,
       });
 
+      // The AI request didn't actually succeed and generic fallback branches were substituted -
+      // tell the user explicitly so they don't mistake this for a real AI-researched expansion.
+      if (data.isFallback) {
+        showToast(fallbackReasonMessage(data.fallbackReason, language));
+      }
+
     } catch (err: any) {
       console.error('Error expanding node:', err);
-      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+      if (err?.message === 'API_KEY_MISSING') {
         setIsSettingsOpen(true);
         showToast(
           language === 'he'
-            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח Gemini API כדי להמשיך'
-            : 'App is running in standalone mode - please enter a Gemini API key to continue'
+            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח API כדי להמשיך'
+            : 'App is running in standalone mode - please enter an API key to continue'
         );
       } else {
-        showToast((language === 'he' ? 'שגיאה בהרחבת הענף: ' : 'Error expanding branch: ') + err.message);
+        showToast((language === 'he' ? 'שגיאה בהרחבת הענף: ' : 'Error expanding branch: ') + (err?.message || String(err)));
       }
     } finally {
       setIsExpanding(false);
@@ -468,7 +518,11 @@ export default function App() {
       setActiveTreeId(newTree.id);
       saveActiveTreeId(newTree.id);
 
-      showToast(`עץ הלמידה "${newTree.topic}" נוצר עם ${approvedNodes.length} ענפים מאושרים!`);
+      showToast(
+        language === 'he'
+          ? `עץ הלמידה "${newTree.topic}" נוצר עם ${approvedNodes.length} ענפים מאושרים!`
+          : `Learning tree "${newTree.topic}" created with ${approvedNodes.length} approved branches!`
+      );
     } else if (stagingBranchApproval.parentNode) {
       // Expanding an existing node
       const parent = stagingBranchApproval.parentNode;
@@ -502,7 +556,12 @@ export default function App() {
         }
 
         setTimeout(() => {
-            showToast(`התווספו ${addedCount} ענפים חדשים! ${addedCount < approvedNodes.length ? `(${approvedNodes.length - addedCount} סוננו עקב כפילות נושאים)` : ''}`);
+          const skippedCount = approvedNodes.length - addedCount;
+          showToast(
+            language === 'he'
+              ? `התווספו ${addedCount} ענפים חדשים! ${skippedCount > 0 ? `(${skippedCount} סוננו עקב כפילות נושאים)` : ''}`
+              : `Added ${addedCount} new branches! ${skippedCount > 0 ? `(${skippedCount} filtered out as duplicate topics)` : ''}`
+          );
         }, 0);
 
         return {
@@ -519,7 +578,11 @@ export default function App() {
   const handlePruneNode = (nodeId: string) => {
     if (!currentTree) return;
     if (nodeId === currentTree.rootNodeId) {
-      showToast("אינך יכול לגדוע את הצומת הראשי. השתמש במחיקת פרויקט.");
+      showToast(
+        language === 'he'
+          ? 'אינך יכול לגדוע את הצומת הראשי. השתמש במחיקת פרויקט.'
+          : 'You cannot prune the root node. Use delete project instead.'
+      );
       return;
     }
 
@@ -532,7 +595,11 @@ export default function App() {
       setSelectedNode(null);
     }
 
-    showToast("הענף וכל ענפי המשנה שלו נגדעו בהצלחה מהעץ");
+    showToast(
+      language === 'he'
+        ? 'הענף וכל ענפי המשנה שלו נגדעו בהצלחה מהעץ'
+        : 'The branch and all its sub-branches were successfully pruned from the tree'
+    );
   };
 
   // Promote Branch to Independent Standalone Project
@@ -545,14 +612,18 @@ export default function App() {
       setSavedTrees(nextSaved);
       saveTreesToStorage(nextSaved);
 
-      showToast(`הענף "${node.title}" הופרד והפך לפרויקט עצמאי במאגר!`);
+      showToast(
+        language === 'he'
+          ? `הענף "${node.title}" הופרד והפך לפרויקט עצמאי במאגר!`
+          : `Branch "${node.title}" was promoted to a standalone project in your library!`
+      );
 
       // Switch to new standalone project
       setActiveTreeId(promotedTree.id);
       saveActiveTreeId(promotedTree.id);
       setSelectedNode(null);
     } catch (err: any) {
-      showToast("שגיאה בהעברת הענף לפרויקט עצמאי: " + err.message);
+      showToast((language === 'he' ? 'שגיאה בהעברת הענף לפרויקט עצמאי: ' : 'Error promoting branch to standalone project: ') + err.message);
     }
   };
 
@@ -604,17 +675,21 @@ export default function App() {
       };
     });
 
-    showToast(`הענף המותאם אישית "${newNode.title}" נוסף בהצלחה!`);
+    showToast(
+      language === 'he'
+        ? `הענף המותאם אישית "${newNode.title}" נוסף בהצלחה!`
+        : `Custom branch "${newNode.title}" added successfully!`
+    );
   };
 
   // Export Image
   const handleExportImage = async () => {
-    showToast('מייצא את מפת הלמידה כתמונה...');
+    showToast(language === 'he' ? 'מייצא את מפת הלמידה כתמונה...' : 'Exporting the learning map as an image...');
     const success = await exportTreeToImage('tree_export_stage', currentTree?.topic || 'learning_map');
     if (success) {
-      showToast('התמונה יורדה בהצלחה!');
+      showToast(language === 'he' ? 'התמונה יורדה בהצלחה!' : 'Image downloaded successfully!');
     } else {
-      showToast('הייצוא נכשל. נסה שוב');
+      showToast(language === 'he' ? 'הייצוא נכשל. נסה שוב' : 'Export failed. Please try again.');
     }
   };
 
@@ -622,12 +697,21 @@ export default function App() {
   const handleExportPdf = async (treeToExport?: LearningTree) => {
     const tree = treeToExport || currentTree;
     if (!tree) return;
-    showToast(language === 'he' ? 'מייצר מסמך PDF עם פירוט נושאים וקישורים...' : 'Generating PDF with topics & hyperlinks...');
-    const success = await exportTreeToPdf(tree, language);
-    if (success) {
-      showToast(language === 'he' ? 'קובץ ה-PDF יורד בהצלחה!' : 'PDF downloaded successfully!');
-    } else {
-      showToast(language === 'he' ? 'הייצוא נכשל. נסה שוב' : 'Export failed. Please try again.');
+    // A large tree can take a while to render at export quality - keep a persistent loading
+    // state (disables/spins the export button) instead of relying on the toast, which
+    // auto-dismisses after a few seconds and previously left no feedback for the rest of the
+    // wait, making the export look stuck/broken even though it eventually completed.
+    setIsExportingPdf(true);
+    showToast(language === 'he' ? 'מייצר מסמך PDF עם פירוט נושאים וקישורים... זה עשוי לקחת מספר שניות' : 'Generating PDF with topics & hyperlinks... this can take a few seconds');
+    try {
+      const success = await exportTreeToPdf(tree, language);
+      if (success) {
+        showToast(language === 'he' ? 'קובץ ה-PDF יורד בהצלחה!' : 'PDF downloaded successfully!');
+      } else {
+        showToast(language === 'he' ? 'הייצוא נכשל. נסה שוב' : 'Export failed. Please try again.');
+      }
+    } finally {
+      setIsExportingPdf(false);
     }
   };
 
@@ -642,7 +726,7 @@ export default function App() {
       setActiveTreeId(nextActive);
       if (nextActive) saveActiveTreeId(nextActive);
     }
-    showToast('עץ הלמידה נמחק');
+    showToast(language === 'he' ? 'עץ הלמידה נמחק' : 'Learning tree deleted');
   };
 
   // Duplicate Tree
@@ -650,7 +734,7 @@ export default function App() {
     const duplicated: LearningTree = {
       ...tree,
       id: `tree_dup_${Date.now()}`,
-      topic: `${tree.topic} (עותק)`,
+      topic: language === 'he' ? `${tree.topic} (עותק)` : `${tree.topic} (Copy)`,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -660,7 +744,7 @@ export default function App() {
     saveTreesToStorage(nextTrees);
     setActiveTreeId(duplicated.id);
     saveActiveTreeId(duplicated.id);
-    showToast('העץ שוכפל בהצלחה');
+    showToast(language === 'he' ? 'העץ שוכפל בהצלחה' : 'Tree duplicated successfully');
   };
 
   // Import Json
@@ -679,12 +763,12 @@ export default function App() {
         saveTreesToStorage(nextTrees);
         setActiveTreeId(importedTree.id);
         saveActiveTreeId(importedTree.id);
-        showToast('קובץ עץ ה-JSON יובא בהצלחה!');
+        showToast(language === 'he' ? 'קובץ עץ ה-JSON יובא בהצלחה!' : 'JSON tree file imported successfully!');
       } else {
-        throw new Error('מבנה JSON לא תקין');
+        throw new Error(language === 'he' ? 'מבנה JSON לא תקין' : 'Invalid JSON structure');
       }
     } catch (err: any) {
-      alert('שגיאה ביבוא קובץ: ' + err.message);
+      alert((language === 'he' ? 'שגיאה ביבוא קובץ: ' : 'Error importing file: ') + err.message);
     }
   };
 
@@ -704,6 +788,7 @@ export default function App() {
         language={language}
         setLanguage={setLanguage}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        isExportingPdf={isExportingPdf}
       />
 
       {/* Main Content Area */}
