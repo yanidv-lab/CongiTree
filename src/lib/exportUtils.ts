@@ -2,6 +2,7 @@ import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { LearningTree, TreeNode, Resource } from '../types';
+import { isNativeExportTarget, saveBinaryFileNative, saveTextFileNative } from './fileSave';
 
 export async function exportTreeToImage(
   elementId: string,
@@ -26,8 +27,15 @@ export async function exportTreeToImage(
       skipFonts: true,
     });
 
+    const pngFileName = `${fileName.replace(/\s+/g, '_')}_learning_tree.png`;
+
+    if (isNativeExportTarget()) {
+      const base64Data = dataUrl.split(',')[1] || '';
+      return await saveBinaryFileNative(base64Data, pngFileName);
+    }
+
     const link = document.createElement('a');
-    link.download = `${fileName.replace(/\s+/g, '_')}_learning_tree.png`;
+    link.download = pngFileName;
     link.href = dataUrl;
     link.click();
     return true;
@@ -37,16 +45,23 @@ export async function exportTreeToImage(
   }
 }
 
-export function exportTreeToJson(tree: any, fileName: string = 'learning_tree') {
+export async function exportTreeToJson(tree: any, fileName: string = 'learning_tree'): Promise<boolean> {
   const jsonStr = JSON.stringify(tree, null, 2);
+  const jsonFileName = `${fileName.replace(/\s+/g, '_')}.json`;
+
+  if (isNativeExportTarget()) {
+    return await saveTextFileNative(jsonStr, jsonFileName);
+  }
+
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
   const link = document.createElement('a');
-  link.download = `${fileName.replace(/\s+/g, '_')}.json`;
+  link.download = jsonFileName;
   link.href = url;
   link.click();
   URL.revokeObjectURL(url);
+  return true;
 }
 
 function escapeSvgText(text: string): string {
@@ -776,10 +791,21 @@ export async function exportTreeToPdf(
     });
 
     const safeFileName = tree.topic.replace(/[^\w\u0590-\u05FF]/g, '_');
-    pdf.save(`${safeFileName}_learning_map.pdf`);
+    const pdfFileName = `${safeFileName}_learning_map.pdf`;
+
+    let saved = true;
+    if (isNativeExportTarget()) {
+      // jsPDF's own .save() falls back to the same <a download> trick that no-ops inside an
+      // Android WebView, so on native platforms hand the raw PDF bytes to the Filesystem+Share
+      // path instead of calling .save() at all.
+      const base64Data = pdf.output('datauristring').split(',')[1] || '';
+      saved = await saveBinaryFileNative(base64Data, pdfFileName);
+    } else {
+      pdf.save(pdfFileName);
+    }
 
     document.body.removeChild(iframe);
-    return true;
+    return saved;
   } catch (err) {
     console.error('Failed to export tree to PDF:', err);
     if (document.body.contains(iframe)) {

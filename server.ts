@@ -890,19 +890,19 @@ Node Description: "${nodeDescription}"
 Current Hierarchy Depth: Level ${nodeDepth} out of ${MAX_NODE_EXPANSION_DEPTH}.
 Ancestor Hierarchy Chain: ${ancestorChain.length > 0 ? ancestorChain.map(a => `"${a}"`).join(' -> ') : 'Root Topic'}
 
-CRITICAL STRICT ANTI-REPETITION & ANTI-LOOP RULES:
-1. Existing nodes ALREADY in this learning tree:
+RULES:
+1. Existing nodes ALREADY in this learning tree (avoid recreating these):
 ${existingTitlesList.map(t => `- "${t}"`).join('\n')}
 
-2. YOU ARE STRICTLY FORBIDDEN FROM GENERATING SUB-BRANCHES THAT ARE NEAR-DUPLICATES OF THE EXISTING TITLES LISTED ABOVE OR ANY ANCESTOR TOPICS - i.e. the same underlying concept, just reworded. Being about the same general parent subject is EXPECTED and FINE (that's what makes it a relevant sub-topic) - only reject a candidate if it would teach essentially the same thing as something already in the list.
-3. DO NOT generate titles that just append prefixes or suffixes like "Introduction to...", "Basics of...", "Advanced...", "מבוא ל...", "יסודות...", "מתקדם...".
-4. If "${nodeTitle}" is already atomic or specific, or if logically it cannot be broken down into distinct, brand-new sub-topics that don't overlap with existing topics, YOU MUST RETURN AN EMPTY ARRAY [] for "expandedSubNodes".
-5. Do NOT inflate the tree artificially. It is much better to return [] than to create duplicate or redundant sub-nodes.
+2. Only reject a candidate sub-topic if it would teach essentially the same concept as one of the existing titles above (a reworded duplicate). Being about the same general parent subject is EXPECTED and desirable - that IS what makes it a relevant sub-topic.
+3. Prefer specific, concrete titles over generic prefixes like "Introduction to...", "Basics of...", "Advanced...", "מבוא ל...", "יסודות...", "מתקדם...".
+4. Almost every topic - even a seemingly specific one - can still be broken down further: deeper mechanisms, specific techniques or tools, notable edge cases, real-world applications, common pitfalls, comparisons with alternatives, or historical/theoretical context not yet covered by the existing titles. Make a genuine, thorough effort to find such angles before concluding there is nothing left. Returning an empty array should be rare - reserve it for cases where "${nodeTitle}" is truly a single atomic fact or every reasonable angle is already covered above, not merely because a topic feels narrow.
+5. Dig for BREADTH of angle, not just theoretical depth: practical applications, hands-on tools/frameworks, case studies, comparisons, or the historical development of the idea are all valid, distinct sub-topics even if the parent node already covers the core theory.
 
 Language requested: ${language === 'he' ? 'Hebrew (עברית)' : 'English or prompt language'}.
 
-If distinct, brand new sub-topics exist, generate 2 to 3 detailed SUB-BRANCH NODES.
-Use Google Search Grounding to find real, verified learning sources.
+Generate 3 to 5 detailed, distinct SUB-BRANCH NODES if any reasonable ones exist (see rule 4) - only return fewer, or an empty array, if you genuinely cannot find that many non-overlapping angles.
+Use Google Search Grounding to research the topic deeply and find real, verified learning sources.
 
 Return ONLY a valid JSON object matching this structure:
 {
