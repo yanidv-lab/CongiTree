@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CongiTree</string>
+    <string name="title_activity_main">CongiTree</string>
+    <string name="package_name">com.congitree.app</string>
+    <string name="custom_url_scheme">com.congitree.app</string>
+</resources>

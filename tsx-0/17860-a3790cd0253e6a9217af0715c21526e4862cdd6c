@@ -1,0 +1,1 @@
+{"code":"const MAX_NODE_EXPANSION_DEPTH=6;export{MAX_NODE_EXPANSION_DEPTH};\n","warnings":[],"map":{"version":3,"mappings":"AAIO,MAAM,yBAA2B","names":[],"ignoreList":[],"sources":["/app/applet/src/lib/constants.ts"],"sourcesContent":[null]}}
