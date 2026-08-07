@@ -10,6 +10,7 @@ import {
   ListTree,
   Library,
   KeyRound,
+  Loader2,
 } from 'lucide-react';
 import { calculateTreeProgress } from '../lib/treeStore';
 import { LearningTree } from '../types';
@@ -27,6 +28,7 @@ interface HeaderProps {
   language: 'he' | 'en';
   setLanguage: (lang: 'he' | 'en') => void;
   onOpenSettings?: () => void;
+  isExportingPdf?: boolean;
 }
 
 const VIEW_TABS: { id: 'dashboard' | 'graph' | 'vault' | 'list'; icon: React.ElementType; labelHe: string; labelEn: string }[] = [
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({
   language,
   setLanguage,
   onOpenSettings,
+  isExportingPdf,
 }) => {
   const progress = currentTree ? calculateTreeProgress(currentTree) : null;
 
@@ -185,10 +188,19 @@ export const Header: React.FC<HeaderProps> = ({
               {onExportPdf && (
                 <button
                   onClick={onExportPdf}
-                  className="p-2 rounded-full text-ink/60 hover:text-ink hover:bg-panel transition-colors"
-                  title={language === 'he' ? 'ייצא מסמך PDF מקיף עם פירוט נושאים וקישורים פעילים' : 'Export comprehensive PDF document with topics breakdown & hyperlinks'}
+                  disabled={isExportingPdf}
+                  className="p-2 rounded-full text-ink/60 hover:text-ink hover:bg-panel transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  title={
+                    isExportingPdf
+                      ? (language === 'he' ? 'מייצר PDF... זה עשוי לקחת מספר שניות' : 'Generating PDF... this can take a few seconds')
+                      : (language === 'he' ? 'ייצא מסמך PDF מקיף עם פירוט נושאים וקישורים פעילים' : 'Export comprehensive PDF document with topics breakdown & hyperlinks')
+                  }
                 >
-                  <FileText className="w-4 h-4" strokeWidth={2.75} />
+                  {isExportingPdf ? (
+                    <Loader2 className="w-4 h-4 animate-spin" strokeWidth={2.75} />
+                  ) : (
+                    <FileText className="w-4 h-4" strokeWidth={2.75} />
+                  )}
                 </button>
               )}
               <button

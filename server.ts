@@ -179,6 +179,52 @@ function sanitizeResourceUrl(rawUrl: string, title: string, topic: string, type:
   return `https://en.wikipedia.org/w/index.php?search=${encodedQuery}&title=Special:Search&fulltext=1`;
 }
 
+// A model can be confidently wrong about a URL even after being told to leave "url" empty when
+// unsure - so before handing resources to the user, do a light real-world reachability check and
+// swap any definitively-dead link for sanitizeResourceUrl's search-based fallback.
+const URL_VERIFY_TIMEOUT_MS = 4000;
+
+async function isUrlDefinitelyDead(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), URL_VERIFY_TIMEOUT_MS);
+    const response = await fetch(url, {
+      method: "HEAD",
+      redirect: "follow",
+      signal: controller.signal,
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; CogniTreeBot/1.0)" },
+    });
+    clearTimeout(timeout);
+    // Only a definitive 404/410 counts as "dead" - many legitimate sites (especially academic
+    // ones) reject HEAD requests, block unrecognized user agents, or gate behind other status
+    // codes, so treating any non-2xx as broken would wrongly discard perfectly good links.
+    return response.status === 404 || response.status === 410;
+  } catch (err) {
+    // Network error, timeout, or the site refused the request outright - can't be sure it's
+    // actually broken (could just be blocking bots), so fail open and keep the original link.
+    return false;
+  }
+}
+
+// Runs all resource-link checks for a tree/sub-node batch in parallel (bounded by
+// URL_VERIFY_TIMEOUT_MS per link) and swaps in a working fallback for anything confirmed dead.
+async function verifyAndFixResourceUrls(nodes: any[], topic: string): Promise<void> {
+  const checks: Promise<void>[] = [];
+  nodes.forEach((node: any) => {
+    (node.resources || []).forEach((res: any) => {
+      checks.push(
+        (async () => {
+          const dead = await isUrlDefinitelyDead(res.url);
+          if (dead) {
+            res.url = sanitizeResourceUrl("", res.title, topic, res.type);
+          }
+        })()
+      );
+    });
+  });
+  await Promise.all(checks);
+}
+
 // Helper to build fallback Learning Tree when AI rate limit / quota is exceeded or unavailable
 function buildFallbackTree(topic: string, language: 'he' | 'en' = 'he') {
   const now = new Date().toISOString();
@@ -442,13 +488,10 @@ function areServerTitlesSimilar(titleA: string, titleB: string): boolean {
   if (!normA || !normB) return false;
   if (normA === normB) return true;
 
-  // Substring containment check
-  if (normA.length > 5 && normB.length > 5) {
-    if (normA.includes(normB) || normB.includes(normA)) {
-      return true;
-    }
-  }
-
+  // Deliberately no raw substring-containment check here: a short title fully contained in a
+  // much longer one (e.g. the tree's own topic "Python" inside a legitimate child topic "Python
+  // Data Structures") is normal parent/child naming, not a duplicate - the core-word comparison
+  // below is a more accurate signal of genuine near-duplicates.
   const coreA = getCoreServerTitleWords(titleA);
   const coreB = getCoreServerTitleWords(titleB);
 
@@ -465,10 +508,15 @@ function areServerTitlesSimilar(titleA: string, titleB: string): boolean {
   const commonCore = coreA.filter(w => coreB.includes(w));
   const minCoreLen = Math.min(coreA.length, coreB.length);
 
-  if (commonCore.length === minCoreLen) return true;
+  // Full containment of the smaller title's core words only signals a duplicate once the smaller
+  // title carries enough distinct signal (2+ core words) - a single shared word is very often
+  // just the parent topic's own name, which every sibling node in the tree will also share.
+  if (minCoreLen >= 2 && commonCore.length === minCoreLen) return true;
 
+  // Require most (not just half) of the core words to overlap - a 50% bar false-collides
+  // distinct sibling topics that merely mention the same parent subject.
   const overlapRatio = commonCore.length / Math.max(coreA.length, coreB.length);
-  if (overlapRatio >= 0.5) return true;
+  if (overlapRatio >= 0.75) return true;
 
   return false;
 }
@@ -713,7 +761,7 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
     } catch (parseErr) {
       console.warn("JSON parse warning from Gemini tree response, using fallback tree:", parseErr?.message || parseErr);
       const fallbackTree = buildFallbackTree(topic, language);
-      return res.json({ success: true, tree: fallbackTree, isFallback: true });
+      return res.json({ success: true, tree: fallbackTree, isFallback: true, fallbackReason: "parse_error" });
     }
 
     // Extract search grounding metadata and filter out search engine query pages
@@ -774,6 +822,8 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
           }
         }
       });
+
+      await verifyAndFixResourceUrls(Object.values(nodesRecord), topic);
     }
 
     const learningTree = {
@@ -790,9 +840,16 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
 
     return res.json({ success: true, tree: learningTree });
   } catch (err: any) {
-    console.warn("Gemini API call failed or rate limited (429), generating intelligent fallback tree:", err?.message || err);
+    const isRateLimit = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
+    const isAuthError = err?.status === 401 || err?.status === 403 || err?.message?.includes("API_KEY_INVALID") || err?.message?.includes("PERMISSION_DENIED");
+    console.warn("Gemini API call failed, generating intelligent fallback tree:", err?.message || err);
     const fallbackTree = buildFallbackTree(topic, language);
-    return res.json({ success: true, tree: fallbackTree, isFallback: true });
+    return res.json({
+      success: true,
+      tree: fallbackTree,
+      isFallback: true,
+      fallbackReason: isRateLimit ? "rate_limit" : isAuthError ? "auth_error" : "api_error",
+    });
   }
 });
 
@@ -833,19 +890,19 @@ Node Description: "${nodeDescription}"
 Current Hierarchy Depth: Level ${nodeDepth} out of ${MAX_NODE_EXPANSION_DEPTH}.
 Ancestor Hierarchy Chain: ${ancestorChain.length > 0 ? ancestorChain.map(a => `"${a}"`).join(' -> ') : 'Root Topic'}
 
-CRITICAL STRICT ANTI-REPETITION & ANTI-LOOP RULES:
-1. Existing nodes ALREADY in this learning tree:
+RULES:
+1. Existing nodes ALREADY in this learning tree (avoid recreating these):
 ${existingTitlesList.map(t => `- "${t}"`).join('\n')}
 
-2. YOU ARE STRICTLY FORBIDDEN FROM GENERATING SUB-BRANCHES THAT REPEAT, OVERLAP, OR RE-WORD ANY OF THE EXISTING TITLES LISTED ABOVE OR ANY ANCESTOR TOPICS.
-3. DO NOT generate titles that just append prefixes or suffixes like "Introduction to...", "Basics of...", "Advanced...", "מבוא ל...", "יסודות...", "מתקדם...".
-4. If "${nodeTitle}" is already atomic or specific, or if logically it cannot be broken down into distinct, brand-new sub-topics that don't overlap with existing topics, YOU MUST RETURN AN EMPTY ARRAY [] for "expandedSubNodes".
-5. Do NOT inflate the tree artificially. It is much better to return [] than to create duplicate or redundant sub-nodes.
+2. Only reject a candidate sub-topic if it would teach essentially the same concept as one of the existing titles above (a reworded duplicate). Being about the same general parent subject is EXPECTED and desirable - that IS what makes it a relevant sub-topic.
+3. Prefer specific, concrete titles over generic prefixes like "Introduction to...", "Basics of...", "Advanced...", "מבוא ל...", "יסודות...", "מתקדם...".
+4. Almost every topic - even a seemingly specific one - can still be broken down further: deeper mechanisms, specific techniques or tools, notable edge cases, real-world applications, common pitfalls, comparisons with alternatives, or historical/theoretical context not yet covered by the existing titles. Make a genuine, thorough effort to find such angles before concluding there is nothing left. Returning an empty array should be rare - reserve it for cases where "${nodeTitle}" is truly a single atomic fact or every reasonable angle is already covered above, not merely because a topic feels narrow.
+5. Dig for BREADTH of angle, not just theoretical depth: practical applications, hands-on tools/frameworks, case studies, comparisons, or the historical development of the idea are all valid, distinct sub-topics even if the parent node already covers the core theory.
 
 Language requested: ${language === 'he' ? 'Hebrew (עברית)' : 'English or prompt language'}.
 
-If distinct, brand new sub-topics exist, generate 2 to 3 detailed SUB-BRANCH NODES.
-Use Google Search Grounding to find real, verified learning sources.
+Generate 3 to 5 detailed, distinct SUB-BRANCH NODES if any reasonable ones exist (see rule 4) - only return fewer, or an empty array, if you genuinely cannot find that many non-overlapping angles.
+Use Google Search Grounding to research the topic deeply and find real, verified learning sources.
 
 Return ONLY a valid JSON object matching this structure:
 {
@@ -896,7 +953,7 @@ Instructions:
       console.warn("JSON parse warning on expand node, using fallback subnodes:", parseErr?.message || parseErr);
       const fallbackSubNodes = buildFallbackSubNodes(treeTopic, nodeId, nodeTitle, nodeDescription, language, existingTitlesList);
       const isEndOfTopic = fallbackSubNodes.length === 0;
-      return res.json({ success: true, parentNodeId: nodeId, subNodes: fallbackSubNodes, isFallback: true, isEndOfTopic });
+      return res.json({ success: true, parentNodeId: nodeId, subNodes: fallbackSubNodes, isFallback: true, fallbackReason: "parse_error", isEndOfTopic });
     }
 
     const createdSubNodes: any[] = [];
@@ -953,13 +1010,24 @@ Instructions:
       });
     }
 
+    await verifyAndFixResourceUrls(createdSubNodes, treeTopic);
+
     const isEndOfTopic = createdSubNodes.length === 0;
     return res.json({ success: true, parentNodeId: nodeId, subNodes: createdSubNodes, isEndOfTopic });
   } catch (err: any) {
-    console.warn("Gemini API call failed for expand-node (429/quota), using fallback sub-nodes generator:", err?.message || err);
+    const isRateLimit = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
+    const isAuthError = err?.status === 401 || err?.status === 403 || err?.message?.includes("API_KEY_INVALID") || err?.message?.includes("PERMISSION_DENIED");
+    console.warn("Gemini API call failed for expand-node, using fallback sub-nodes generator:", err?.message || err);
     const fallbackSubNodes = buildFallbackSubNodes(treeTopic, nodeId, nodeTitle, nodeDescription, language, existingTitlesList);
     const isEndOfTopic = fallbackSubNodes.length === 0;
-    return res.json({ success: true, parentNodeId: nodeId, subNodes: fallbackSubNodes, isFallback: true, isEndOfTopic });
+    return res.json({
+      success: true,
+      parentNodeId: nodeId,
+      subNodes: fallbackSubNodes,
+      isFallback: true,
+      fallbackReason: isRateLimit ? "rate_limit" : isAuthError ? "auth_error" : "api_error",
+      isEndOfTopic,
+    });
   }
 });
 

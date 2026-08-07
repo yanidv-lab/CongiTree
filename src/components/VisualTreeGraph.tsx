@@ -466,8 +466,15 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
           transformOrigin: '50% 10%',
         }}
       >
-        {/* SVG Connecting Paths Layer */}
-        <svg className="absolute inset-0 w-full h-full pointer-events-none overflow-visible">
+        {/* SVG Connecting Paths Layer - positioned with the same horizontal origin as the node-card
+            layer below: pinned to the container's center with an effectively-zero own width, so
+            local x=0 (what the layout math below treats as "center") lands exactly there, and
+            overflow:visible lets paths using negative/positive x render outside that sliver.
+            inset-0/w-full would instead anchor local x=0 to the container's physical left edge,
+            offsetting every connector line from the cards it's supposed to connect to. Width is
+            1px rather than a true 0 because the SVG spec disables rendering the element entirely
+            when width (or height) is exactly zero, even with overflow:visible on descendants. */}
+        <svg className="absolute top-0 left-1/2 h-full pointer-events-none overflow-visible" style={{ width: 1 }}>
           {positionedNodes.map(pn => {
             if (!pn.node.parentId) return null;
             const parentPn = nodePosMap.get(pn.node.parentId);
@@ -544,6 +551,7 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                 key={node.id}
                 ref={(el) => setCardRef(node.id, el)}
                 style={{
+                  left: 0,
                   transform: `translate(${pn.x - CARD_WIDTH / 2}px, ${pn.y}px)`,
                   width: `${CARD_WIDTH}px`,
                 }}

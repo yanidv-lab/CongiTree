@@ -2,6 +2,7 @@ import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { LearningTree, TreeNode, Resource } from '../types';
+import { isNativeExportTarget, saveBinaryFileNative, saveTextFileNative } from './fileSave';
 
 export async function exportTreeToImage(
   elementId: string,
@@ -18,10 +19,23 @@ export async function exportTreeToImage(
       quality: 0.95,
       pixelRatio: 2,
       backgroundColor: '#020617', // slate-950
+      // Skip web-font embedding entirely: html-to-image tries to read .cssRules off every
+      // stylesheet on the page to inline font-face declarations, and browsers always throw a
+      // SecurityError doing that for the cross-origin Google Fonts <link> in index.html (it has
+      // no crossorigin attribute) - the UI already renders with those fonts, so re-embedding them
+      // into the exported bitmap isn't needed.
+      skipFonts: true,
     });
 
+    const pngFileName = `${fileName.replace(/\s+/g, '_')}_learning_tree.png`;
+
+    if (isNativeExportTarget()) {
+      const base64Data = dataUrl.split(',')[1] || '';
+      return await saveBinaryFileNative(base64Data, pngFileName);
+    }
+
     const link = document.createElement('a');
-    link.download = `${fileName.replace(/\s+/g, '_')}_learning_tree.png`;
+    link.download = pngFileName;
     link.href = dataUrl;
     link.click();
     return true;
@@ -31,16 +45,23 @@ export async function exportTreeToImage(
   }
 }
 
-export function exportTreeToJson(tree: any, fileName: string = 'learning_tree') {
+export async function exportTreeToJson(tree: any, fileName: string = 'learning_tree'): Promise<boolean> {
   const jsonStr = JSON.stringify(tree, null, 2);
+  const jsonFileName = `${fileName.replace(/\s+/g, '_')}.json`;
+
+  if (isNativeExportTarget()) {
+    return await saveTextFileNative(jsonStr, jsonFileName);
+  }
+
   const blob = new Blob([jsonStr], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
 
   const link = document.createElement('a');
-  link.download = `${fileName.replace(/\s+/g, '_')}.json`;
+  link.download = jsonFileName;
   link.href = url;
   link.click();
   URL.revokeObjectURL(url);
+  return true;
 }
 
 function escapeSvgText(text: string): string {
@@ -248,11 +269,18 @@ export async function exportTreeToPdf(
   const liveGraphCanvas = document.getElementById('visual_tree_graph_canvas');
   if (liveGraphCanvas) {
     try {
-      liveGraphDataUrl = await toPng(liveGraphCanvas, {
-        quality: 0.95,
-        pixelRatio: 2,
-        backgroundColor: '#f8fafc',
-      });
+      // Race against a timeout so a slow/failing font read (see skipFonts note above) can never
+      // hang the whole PDF export - the vector SVG tree diagram below covers the same content
+      // and needs no snapshot at all if this step doesn't finish in time.
+      liveGraphDataUrl = await Promise.race([
+        toPng(liveGraphCanvas, {
+          quality: 0.95,
+          pixelRatio: 2,
+          backgroundColor: '#f8fafc',
+          skipFonts: true,
+        }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+      ]);
     } catch (err) {
       console.warn('Live graph canvas snapshot skipped:', err);
     }
@@ -763,10 +791,21 @@ export async function exportTreeToPdf(
     });
 
     const safeFileName = tree.topic.replace(/[^\w\u0590-\u05FF]/g, '_');
-    pdf.save(`${safeFileName}_learning_map.pdf`);
+    const pdfFileName = `${safeFileName}_learning_map.pdf`;
+
+    let saved = true;
+    if (isNativeExportTarget()) {
+      // jsPDF's own .save() falls back to the same <a download> trick that no-ops inside an
+      // Android WebView, so on native platforms hand the raw PDF bytes to the Filesystem+Share
+      // path instead of calling .save() at all.
+      const base64Data = pdf.output('datauristring').split(',')[1] || '';
+      saved = await saveBinaryFileNative(base64Data, pdfFileName);
+    } else {
+      pdf.save(pdfFileName);
+    }
 
     document.body.removeChild(iframe);
-    return true;
+    return saved;
   } catch (err) {
     console.error('Failed to export tree to PDF:', err);
     if (document.body.contains(iframe)) {

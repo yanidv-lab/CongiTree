@@ -179,7 +179,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                           ? 'bg-emerald-500 text-white hover:bg-emerald-600 shadow-xs'
                           : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
                       }`}
-                      title={isApproved ? 'ענף מאושר (לחץ לגדיעה)' : 'ענף גדוע (לחץ לאישור)'}
+                      title={isApproved ? (isHe ? 'ענף מאושר (לחץ לגדיעה)' : 'Branch approved (click to prune)') : (isHe ? 'ענף גדוע (לחץ לאישור)' : 'Branch pruned (click to approve)')}
                     >
                       {isApproved ? (
                         <CheckCircle2 className="w-6 h-6 fill-emerald-500 stroke-white" />
@@ -196,9 +196,9 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                           node.level === 'advanced' ? 'bg-purple-50 text-purple-700 border-purple-200' :
                           'bg-teal-50 text-teal-700 border-teal-200'
                         }`}>
-                          {node.level === 'foundation' ? 'יסודות' :
-                           node.level === 'core' ? 'ליבה' :
-                           node.level === 'advanced' ? 'מתקדם' : 'התמחות'}
+                          {node.level === 'foundation' ? (isHe ? 'יסודות' : 'Foundation') :
+                           node.level === 'core' ? (isHe ? 'ליבה' : 'Core') :
+                           node.level === 'advanced' ? (isHe ? 'מתקדם' : 'Advanced') : (isHe ? 'התמחות' : 'Specialization')}
                         </span>
 
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
@@ -206,7 +206,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : 'bg-red-50 text-red-700 border border-red-200'
                         }`}>
-                          {isApproved ? 'מאושר להוספה' : 'ענף גדוע / נדחה'}
+                          {isApproved ? (isHe ? 'מאושר להוספה' : 'Approved to add') : (isHe ? 'ענף גדוע / נדחה' : 'Pruned / rejected')}
                         </span>
                       </div>
 
@@ -240,14 +240,14 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                           : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'
                       }`}
                     >
-                      {isApproved ? 'גדע ענף זה' : 'אשר ענף זה'}
+                      {isApproved ? (isHe ? 'גדע ענף זה' : 'Prune this branch') : (isHe ? 'אשר ענף זה' : 'Approve this branch')}
                     </button>
 
                     <button
                       onClick={() => setExpandedIndex(isExpanded ? null : idx)}
                       className="text-[11px] text-slate-500 hover:text-indigo-600 flex items-center gap-1 font-medium mt-1"
                     >
-                      <span>{isExpanded ? 'הסתר פרטים' : 'הצג יעדים ומקורות'}</span>
+                      <span>{isExpanded ? (isHe ? 'הסתר פרטים' : 'Hide details') : (isHe ? 'הצג יעדים ומקורות' : 'Show goals & sources')}</span>
                       {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                     </button>
                   </div>
@@ -259,7 +259,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                     {/* Objectives */}
                     {node.items && node.items.length > 0 && (
                       <div>
-                        <div className="text-[11px] font-bold text-slate-700 mb-1">יעדי למידה מוצעים:</div>
+                        <div className="text-[11px] font-bold text-slate-700 mb-1">{isHe ? 'יעדי למידה מוצעים:' : 'Suggested learning goals:'}</div>
                         <ul className="list-disc list-inside text-xs text-slate-600 space-y-1 pr-1">
                           {node.items.map((item, iIdx) => (
                             <li key={iIdx}>{item.text}</li>
@@ -271,7 +271,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
                     {/* Resources */}
                     {node.resources && node.resources.length > 0 && (
                       <div>
-                        <div className="text-[11px] font-bold text-slate-700 mb-1">מקורות לימוד שנמצאו:</div>
+                        <div className="text-[11px] font-bold text-slate-700 mb-1">{isHe ? 'מקורות לימוד שנמצאו:' : 'Learning resources found:'}</div>
                         <div className="space-y-1.5">
                           {node.resources.map((res, rIdx) => (
                             <div key={rIdx} className="text-xs bg-white p-2 rounded-lg border border-slate-200 flex items-center justify-between gap-2">
@@ -300,7 +300,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
             onClick={onCancel}
             className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 transition-colors"
           >
-            ביטול
+            {isHe ? 'ביטול' : 'Cancel'}
           </button>
 
           <button
@@ -313,7 +313,7 @@ export const BranchApprovalModal: React.FC<BranchApprovalModalProps> = ({
             }`}
           >
             <Check className="w-4 h-4 stroke-[3]" />
-            <span>אשר {approvedCount} ענפים נבחרים והוסף לעץ</span>
+            <span>{isHe ? `אשר ${approvedCount} ענפים נבחרים והוסף לעץ` : `Approve ${approvedCount} selected branches & add to tree`}</span>
           </button>
         </div>
       </div>

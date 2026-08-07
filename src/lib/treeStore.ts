@@ -173,12 +173,15 @@ export function areTitlesDuplicateOrSimilar(titleA: string, titleB: string): boo
   if (!normA || !normB) return false;
   if (normA === normB) return true;
 
-  // Direct substring check if one is inside the other
-  if (normA.length > 5 && normB.length > 5) {
-    if (normA.includes(normB) || normB.includes(normA)) {
-      return true;
-    }
-  }
+  // Deliberately no raw substring-containment check here anymore: a short title fully contained
+  // in a much longer one (e.g. the tree's own topic "Python" inside a legitimate child topic
+  // "Python Data Structures", or "Machine Learning" inside "Machine Learning Ethics") is normal
+  // parent/child naming, not a duplicate - that used to get blocked here regardless of how
+  // little of the longer title it actually accounted for, which was the main cause of expansion
+  // getting stuck with "no more sub-topics" on every attempt once a tree had more than a couple
+  // of nodes. The core-word comparison below is a more accurate signal of genuine near-duplicates
+  // (e.g. "Data Structures" vs "Data Structures and Algorithms" still matches via full core-word
+  // containment, since "and" is a stripped filler word).
 
   // Compare core significant word tokens
   const coreA = getCoreTitleWords(titleA);
@@ -199,14 +202,18 @@ export function areTitlesDuplicateOrSimilar(titleA: string, titleB: string): boo
   const commonCore = coreA.filter(w => coreB.includes(w));
   const minCoreLen = Math.min(coreA.length, coreB.length);
 
-  // If all core words of the smaller title are present in the larger title, it's duplicate/sub-concept
-  if (commonCore.length === minCoreLen) {
+  // Full containment of the smaller title's core words only signals a duplicate once the smaller
+  // title carries enough distinct signal (2+ core words) - a single shared word is very often
+  // just the parent topic's own name, which every sibling node in the tree will also share.
+  if (minCoreLen >= 2 && commonCore.length === minCoreLen) {
     return true;
   }
 
-  // If >50% of core words overlap
+  // Require most (not just half) of the core words to overlap - a 50% bar false-collides
+  // distinct sibling topics that merely mention the same parent subject, e.g. "Python Loops"
+  // and "Python Functions" both contain "Python".
   const overlapRatio = commonCore.length / Math.max(coreA.length, coreB.length);
-  if (overlapRatio >= 0.5) {
+  if (overlapRatio >= 0.75) {
     return true;
   }
 
