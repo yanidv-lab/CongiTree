@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/organic-e6d41795-986b-41f2-8f20-1fa6237c4f30/styles.css">
+  <script src="_ds/organic-e6d41795-986b-41f2-8f20-1fa6237c4f30/_ds_bundle.js"></script>
+  <style>
+    body{margin:0}
+    .ct-icon-btn{background:none;border:none;cursor:pointer;padding:0;color:inherit;font:inherit}
+    /* Recolored accent for CogniTree: a mature slate-blue in place of the system's default terracotta,
+       matching the same lightness steps so contrast/hover states still work. Sage secondary kept as-is. */
+    :root{
+      --color-accent:#3b5266;
+      --color-accent-100:#eef1f5;
+      --color-accent-200:#dbe3ea;
+      --color-accent-300:#b7c6d3;
+      --color-accent-400:#8aa1b6;
+      --color-accent-500:#5c7791;
+      --color-accent-600:#455f78;
+      --color-accent-700:#33485f;
+      --color-accent-800:#243444;
+      --color-accent-900:#16212c;
+    }
+  </style>
+</helmet>
+
+<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body);display:flex;flex-direction:column">
+
+  <!-- ===== NAV ===== -->
+  <div class="nav" style="background:var(--color-bg);border-bottom:1px solid var(--color-divider)">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:38px;height:38px;border-radius:999px;background:var(--color-accent);display:flex;align-items:center;justify-content:center;flex:none">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.4"></circle><circle cx="5" cy="19" r="2.4"></circle><circle cx="19" cy="19" r="2.4"></circle><path d="M12 7.4v5.6M12 13l-5.6 4M12 13l5.6 4"></path></svg>
+      </div>
+      <div class="nav-brand" style="margin-right:0">CogniTree</div>
+      <span class="tag tag-outline" style="margin-left:2px">AI Learning Trees</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px;background:var(--color-surface);border:1px solid var(--color-divider);border-radius:999px;padding:4px">
+      <button class="ct-icon-btn" onClick="{{ goDashboard }}" style="{{ tabStyleDashboard }}">Projects</button>
+      <button class="ct-icon-btn" onClick="{{ goTree }}" style="{{ tabStyleTree }}">Visual Tree</button>
+      <button class="ct-icon-btn" onClick="{{ goVault }}" style="{{ tabStyleVault }}">Resource Vault</button>
+    </div>
+
+    <button class="btn btn-primary" onClick="{{ openNewModal }}" style="margin-right:0">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+      New Tree
+    </button>
+  </div>
+
+  <!-- ===== DASHBOARD ===== -->
+  <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+    <div style="flex:1;padding:36px 48px 60px;max-width:1280px;margin:0 auto;width:100%;box-sizing:border-box">
+      <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:16px;margin-bottom:28px;flex-wrap:wrap">
+        <div>
+          <h1 style="margin-bottom:4px">Your learning trees</h1>
+          <p class="text-muted" style="margin:0;font-size:14px">Every topic you're growing, and how far each has come.</p>
+        </div>
+      </div>
+
+      <!-- stats banner -->
+      <div class="card elev-sm" style="flex-direction:row;align-items:center;gap:0;padding:0;margin-bottom:28px;overflow:hidden">
+        <div style="flex:1;display:flex;align-items:center;gap:16px;padding:22px 26px;border-right:1px solid var(--color-divider)">
+          <svg width="56" height="56" viewBox="0 0 56 56" style="transform:rotate(-90deg);flex:none">
+            <circle cx="28" cy="28" r="24" fill="none" stroke="var(--color-neutral-200)" stroke-width="6"></circle>
+            <circle cx="28" cy="28" r="24" fill="none" stroke="var(--color-accent)" stroke-width="6" stroke-linecap="round" stroke-dasharray="150.8" stroke-dashoffset="{{ ringOffsetAvg }}"></circle>
+          </svg>
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--color-neutral-600)">Average progress</div>
+            <div style="font-family:var(--font-heading);font-size:24px">{{ avgCompletion }}%</div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;align-items:center;gap:14px;padding:22px 26px;border-right:1px solid var(--color-divider)">
+          <div style="width:44px;height:44px;border-radius:999px;background:var(--color-accent-2-100);color:var(--color-accent-2-800);display:flex;align-items:center;justify-content:center;flex:none">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"></path></svg>
+          </div>
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--color-neutral-600)">Completed trees</div>
+            <div style="font-family:var(--font-heading);font-size:24px">{{ completedCount }} <span style="font-family:var(--font-body);font-size:13px;color:var(--color-neutral-600)">/ {{ totalTrees }}</span></div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;align-items:center;gap:14px;padding:22px 26px">
+          <div style="width:44px;height:44px;border-radius:999px;background:var(--color-accent-100);color:var(--color-accent-800);display:flex;align-items:center;justify-content:center;flex:none">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          </div>
+          <div>
+            <div style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--color-neutral-600)">Tasks &amp; resources done</div>
+            <div style="font-family:var(--font-heading);font-size:24px">{{ tasksDone }} <span style="font-family:var(--font-body);font-size:13px;color:var(--color-neutral-600)">/ {{ tasksTotal }}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="{{ dashboardGridStyle }}">
+        <sc-for list="{{ savedTrees }}" as="t" hint-placeholder-count="4">
+          <div class="card elev-sm" style="{{ t.cardStyle }}" onClick="{{ t.onOpen }}">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="width:34px;height:34px;border-radius:10px;background:{{ t.iconBg }};color:{{ t.iconFg }};display:flex;align-items:center;justify-content:center;flex:none">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"></circle><circle cx="5" cy="19" r="2"></circle><circle cx="19" cy="19" r="2"></circle><path d="M12 7v6M12 13l-5.5 4M12 13l5.5 4"></path></svg>
+                </div>
+                <sc-if value="{{ t.active }}" hint-placeholder-val="{{ false }}">
+                  <span class="tag tag-accent">Active</span>
+                </sc-if>
+              </div>
+              <svg width="46" height="46" viewBox="0 0 46 46" style="transform:rotate(-90deg);flex:none">
+                <circle cx="23" cy="23" r="19" fill="none" stroke="var(--color-neutral-200)" stroke-width="4.5"></circle>
+                <circle cx="23" cy="23" r="19" fill="none" stroke="{{ t.ringColor }}" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="119.4" stroke-dashoffset="{{ t.ringOffset }}"></circle>
+              </svg>
+            </div>
+            <div class="card-title" style="margin-top:6px">{{ t.title }}</div>
+            <p class="card-body">{{ t.desc }}</p>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-600);margin-top:4px">
+              <span>Tasks completed</span><span style="font-weight:700;color:var(--color-text)">{{ t.tasksLabel }}</span>
+            </div>
+            <div style="width:100%;height:6px;background:var(--color-neutral-200);border-radius:999px;overflow:hidden">
+              <div style="height:100%;border-radius:999px;background:{{ t.ringColor }};width:{{ t.percentLabel }}"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:10px;border-top:1px solid var(--color-divider)">
+              <span class="card-meta">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="3"></rect><path d="M8 3v4M16 3v4M3 10h18"></path></svg>
+                {{ t.date }}
+              </span>
+              <div style="display:flex;gap:4px">
+                <button class="btn btn-icon btn-ghost" title="Export PDF" onClick="{{ t.stop }}">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v13H6z"></path><path d="M9 13h6M9 17h6"></path></svg>
+                </button>
+                <button class="btn btn-icon btn-ghost" title="Delete" onClick="{{ t.stop }}">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m2 0-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7"></path></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== VISUAL TREE CANVAS ===== -->
+  <sc-if value="{{ isTree }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;overflow:auto;padding:36px 24px 80px;position:relative">
+      <div style="max-width:1000px;margin:0 auto 24px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+        <div>
+          <h2 style="margin-bottom:2px">Machine Learning Fundamentals</h2>
+          <p class="text-muted" style="margin:0;font-size:13px">Click any branch to open its checklist and resources. Dashed cards can still be grown.</p>
+        </div>
+        <span class="tag tag-accent">42% complete</span>
+      </div>
+
+      <div style="position:relative;width:1400px;min-height:600px;margin:0 auto">
+        <!-- root -->
+        <div class="card elev-md" style="position:absolute;left:560px;top:0;width:280px;background:var(--color-accent-100);border:1px solid var(--color-accent-300)">
+          <span class="tag tag-outline" style="align-self:flex-start">Root topic</span>
+          <div class="card-title">Machine Learning Fundamentals</div>
+          <p class="card-body" style="opacity:.75">A path from linear algebra to deploying models in production.</p>
+        </div>
+
+        <!-- connectors: root to bus -->
+        <div style="position:absolute;left:699px;top:120px;width:2px;height:50px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:220px;top:170px;width:960px;height:2px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:219px;top:170px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:539px;top:170px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:859px;top:170px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:1179px;top:170px;width:2px;height:30px;background:var(--color-divider)"></div>
+
+        <!-- core row -->
+        <div class="card elev-sm" style="position:absolute;left:90px;top:200px;width:260px;cursor:pointer" onClick="{{ selectMathFound }}">
+          <span class="tag tag-accent-2" style="align-self:flex-start">Foundation</span>
+          <div class="card-title">Mathematical Foundations</div>
+          <p class="card-body">Linear algebra, calculus and probability ML theory rests on.</p>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-600)"><span>2/4 tasks</span><span>3 resources</span></div>
+          <div style="width:100%;height:5px;background:var(--color-neutral-200);border-radius:999px;overflow:hidden"><div style="width:50%;height:100%;background:var(--color-accent-2-500)"></div></div>
+        </div>
+
+        <div class="card elev-sm" style="position:absolute;left:410px;top:200px;width:260px;cursor:pointer" onClick="{{ selectNnarch }}">
+          <span class="tag tag-accent" style="align-self:flex-start">Core</span>
+          <div class="card-title">Neural Network Architectures</div>
+          <p class="card-body">From perceptrons to transformers — how modern nets are built.</p>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-600)"><span>1/3 tasks</span><span>2 resources</span></div>
+          <div style="width:100%;height:5px;background:var(--color-neutral-200);border-radius:999px;overflow:hidden"><div style="width:33%;height:100%;background:var(--color-accent-500)"></div></div>
+        </div>
+
+        <div class="card elev-sm" style="position:absolute;left:730px;top:200px;width:260px;cursor:pointer" onClick="{{ selectRl }}">
+          <span class="tag tag-accent" style="align-self:flex-start">Core</span>
+          <div class="card-title">Reinforcement Learning</div>
+          <p class="card-body">Agents that learn by acting, rewarded for outcomes.</p>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-600)"><span>0/3 tasks</span><span>2 resources</span></div>
+          <div style="width:100%;height:5px;background:var(--color-neutral-200);border-radius:999px;overflow:hidden"><div style="width:0%;height:100%;background:var(--color-accent-500)"></div></div>
+        </div>
+
+        <div class="card elev-sm" style="position:absolute;left:1050px;top:200px;width:260px;cursor:pointer" onClick="{{ selectMlops }}">
+          <span class="tag tag-neutral" style="align-self:flex-start">Advanced</span>
+          <div class="card-title">MLOps &amp; Deployment</div>
+          <p class="card-body">Shipping, monitoring and retraining models safely.</p>
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-neutral-600)"><span>0/3 tasks</span><span>2 resources</span></div>
+          <sc-if value="{{ showExpansionHints }}" hint-placeholder-val="{{ true }}">
+            <button class="btn btn-secondary" style="border-style:dashed;font-size:12px;padding:6px 10px" onClick="{{ stopClick }}">+ Grow this branch</button>
+          </sc-if>
+        </div>
+
+        <!-- children of Neural Network Architectures -->
+        <div style="position:absolute;left:539px;top:370px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:460px;top:400px;width:160px;height:2px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:459px;top:400px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:619px;top:400px;width:2px;height:30px;background:var(--color-divider)"></div>
+
+        <div class="card elev-sm" style="position:absolute;left:370px;top:430px;width:180px;cursor:pointer" onClick="{{ selectBackprop }}">
+          <span class="tag tag-neutral" style="align-self:flex-start">Advanced</span>
+          <div class="card-title" style="font-size:14px">Backpropagation Deep Dive</div>
+          <div style="font-size:11px;color:var(--color-neutral-600)">1/3 tasks &middot; 2 resources</div>
+        </div>
+        <div class="card elev-sm" style="position:absolute;left:530px;top:430px;width:180px;cursor:pointer" onClick="{{ selectCnnTrans }}">
+          <span class="tag tag-outline" style="align-self:flex-start">Specialization</span>
+          <div class="card-title" style="font-size:14px">CNN vs Transformer Design</div>
+          <div style="font-size:11px;color:var(--color-neutral-600)">0/3 tasks &middot; 2 resources</div>
+        </div>
+
+        <!-- children of Reinforcement Learning -->
+        <div style="position:absolute;left:859px;top:370px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:780px;top:400px;width:160px;height:2px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:779px;top:400px;width:2px;height:30px;background:var(--color-divider)"></div>
+        <div style="position:absolute;left:939px;top:400px;width:2px;height:30px;background:var(--color-divider)"></div>
+
+        <div class="card elev-sm" style="position:absolute;left:690px;top:430px;width:180px;cursor:pointer" onClick="{{ selectPolicyGrad }}">
+          <span class="tag tag-neutral" style="align-self:flex-start">Advanced</span>
+          <div class="card-title" style="font-size:14px">Policy Gradient Methods</div>
+          <div style="font-size:11px;color:var(--color-neutral-600)">0/3 tasks &middot; 2 resources</div>
+        </div>
+        <div class="card elev-sm" style="position:absolute;left:850px;top:430px;width:180px;cursor:pointer" onClick="{{ selectMultiAgent }}">
+          <span class="tag tag-outline" style="align-self:flex-start">Specialization</span>
+          <div class="card-title" style="font-size:14px">Multi-Agent Systems</div>
+          <div style="font-size:11px;color:var(--color-neutral-600)">0/2 tasks &middot; 2 resources</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== NODE DETAIL DRAWER ===== -->
+    <sc-if value="{{ hasSelectedNode }}" hint-placeholder-val="{{ false }}">
+      <div style="position:fixed;inset:0;background:color-mix(in srgb, var(--color-neutral-900) 35%, transparent);z-index:40" onClick="{{ closeDrawer }}"></div>
+      <div class="elev-lg" style="position:fixed;top:0;right:0;bottom:0;width:420px;background:var(--color-bg);border-left:1px solid var(--color-divider);z-index:41;display:flex;flex-direction:column">
+        <div style="padding:22px 24px;border-bottom:1px solid var(--color-divider);display:flex;justify-content:space-between;align-items:flex-start;gap:10px">
+          <div>
+            <span class="tag" style="{{ selectedNode.tagStyle }}">{{ selectedNode.levelLabel }}</span>
+            <h3 style="margin:8px 0 4px">{{ selectedNode.title }}</h3>
+            <p class="text-muted" style="margin:0;font-size:13px">{{ selectedNode.desc }}</p>
+          </div>
+          <button class="btn btn-icon btn-ghost" onClick="{{ closeDrawer }}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        <div style="flex:1;overflow:auto;padding:20px 24px;display:flex;flex-direction:column;gap:22px">
+          <div>
+            <h6 style="margin-bottom:10px;color:var(--color-neutral-600)">Checklist</h6>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ selectedNode.items }}" as="it" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:10px;cursor:pointer" onClick="{{ it.toggle }}">
+                  <div style="{{ it.boxStyle }}">
+                    <sc-if value="{{ it.completed }}" hint-placeholder-val="{{ false }}">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+                    </sc-if>
+                  </div>
+                  <span style="{{ it.textStyle }}">{{ it.text }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div>
+            <h6 style="margin-bottom:10px;color:var(--color-neutral-600)">Resources</h6>
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ selectedNode.resources }}" as="r" hint-placeholder-count="2">
+                <div class="card" style="flex-direction:row;align-items:center;gap:10px;padding:10px 12px">
+                  <div style="width:30px;height:30px;border-radius:8px;background:var(--color-accent-100);color:var(--color-accent-700);display:flex;align-items:center;justify-content:center;flex:none">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+                  </div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</div>
+                    <div style="font-size:11px;color:var(--color-neutral-600)">{{ r.provider }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Your notes</label>
+            <textarea class="input" rows="3" placeholder="Jot down what clicked, what didn't..."></textarea>
+          </div>
+        </div>
+
+        <div style="padding:16px 24px;border-top:1px solid var(--color-divider);display:flex;gap:8px">
+          <button class="btn btn-primary" style="flex:1" onClick="{{ stopClick }}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v18l7-5 7 5V3z"></path></svg>
+            Grow branch
+          </button>
+          <button class="btn btn-secondary" onClick="{{ stopClick }}">Split off</button>
+          <button class="btn btn-icon btn-secondary" title="Prune branch" onClick="{{ stopClick }}">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2m2 0-1 13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 7"></path></svg>
+          </button>
+        </div>
+      </div>
+    </sc-if>
+  </sc-if>
+
+  <!-- ===== RESOURCE VAULT ===== -->
+  <sc-if value="{{ isVault }}" hint-placeholder-val="{{ false }}">
+    <div style="flex:1;padding:36px 48px 60px;max-width:1000px;margin:0 auto;width:100%;box-sizing:border-box">
+      <h2 style="margin-bottom:4px">Resource vault</h2>
+      <p class="text-muted" style="margin:0 0 20px;font-size:14px">Every source collected across Machine Learning Fundamentals, in one shelf.</p>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px">
+        <sc-for list="{{ vaultFilters }}" as="f" hint-placeholder-count="5">
+          <button class="ct-icon-btn" style="{{ f.style }}" onClick="{{ f.onClick }}">{{ f.label }}</button>
+        </sc-for>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <sc-for list="{{ vaultResources }}" as="r" hint-placeholder-count="6">
+          <div class="card" style="flex-direction:row;align-items:center;gap:14px;padding:14px 16px">
+            <div style="width:34px;height:34px;border-radius:9px;background:var(--color-accent-100);color:var(--color-accent-700);display:flex;align-items:center;justify-content:center;flex:none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+            </div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:14px;font-weight:600">{{ r.title }}</div>
+              <div style="font-size:12px;color:var(--color-neutral-600)">{{ r.provider }} &middot; from {{ r.nodeTitle }}</div>
+            </div>
+            <span class="tag tag-neutral">{{ r.typeLabel }}</span>
+            <div style="{{ r.boxStyle }}" onClick="{{ r.toggle }}">
+              <sc-if value="{{ r.completed }}" hint-placeholder-val="{{ false }}">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg)" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== NEW TREE MODAL ===== -->
+  <sc-if value="{{ showNewModal }}" hint-placeholder-val="{{ false }}">
+    <div class="dialog-backdrop" style="z-index:50" onClick="{{ closeNewModal }}">
+      <div class="dialog" onClick="{{ stopClick }}">
+        <div class="dialog-title">Start a new learning tree</div>
+        <div class="field">
+          <label>Topic</label>
+          <input class="input" type="text" placeholder="e.g. Distributed Systems, Behavioral Economics..."></input>
+        </div>
+        <div class="field">
+          <label>Depth</label>
+          <div class="seg">
+            <label class="seg-opt"><input type="radio" name="depth" defaultChecked="{{ true }}"></input>Basic</label>
+            <label class="seg-opt"><input type="radio" name="depth"></input>Comprehensive</label>
+            <label class="seg-opt"><input type="radio" name="depth"></input>Mastery</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Custom instructions (optional)</label>
+          <textarea class="input" rows="2" placeholder="Focus areas, prior knowledge to assume, tone..."></textarea>
+        </div>
+        <div class="dialog-actions">
+          <button class="btn btn-secondary" onClick="{{ closeNewModal }}">Cancel</button>
+          <button class="btn btn-primary" onClick="{{ closeNewModal }}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18"></path></svg>
+            Generate tree
+          </button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:960},&quot;initialScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;dashboard&quot;,&quot;options&quot;:[&quot;dashboard&quot;,&quot;tree&quot;,&quot;vault&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Behavior&quot;},&quot;densityMode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;default&quot;:&quot;comfortable&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Behavior&quot;},&quot;showExpansionHints&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Behavior&quot;}}">
+class Component extends DCLogic {
+  state = {
+    screen: null,
+    selectedNodeId: null,
+    showNewModal: false,
+    vaultFilter: 'all',
+    checks: {},
+  };
+
+  NODES = {
+    root: { title: 'Machine Learning Fundamentals', level: 'Root topic', tag: 'tag-outline',
+      desc: "A complete path from linear algebra to deploying models in production.",
+      items: ['Frame what "learning" means for a machine', 'Survey supervised vs unsupervised vs RL', 'Set up a Python + notebook environment', 'Pick a first capstone problem'],
+      resources: [{title:'Machine Learning Yearning', provider:'Andrew Ng — free ebook'}, {title:'CS229 Lecture Notes', provider:'Stanford'}, {title:'A Visual Intro to ML', provider:'R2D3 — interactive article'}] },
+    mathfound: { title: 'Mathematical Foundations', level: 'Foundation', tag: 'tag-accent-2',
+      desc: 'Linear algebra, calculus and probability that ML theory rests on.',
+      items: ['Vectors, matrices and eigen-decomposition', 'Gradients and the chain rule', 'Probability distributions and Bayes rule'],
+      resources: [{title:'Essence of Linear Algebra', provider:'3Blue1Brown — YouTube'}, {title:'Mathematics for Machine Learning', provider:'Deisenroth, Faisal & Ong — book'}] },
+    nnarch: { title: 'Neural Network Architectures', level: 'Core', tag: 'tag-accent',
+      desc: 'From perceptrons to transformers — how modern networks are structured.',
+      items: ['Build a perceptron from scratch', 'Stack layers into an MLP', 'Read the original Transformer paper'],
+      resources: [{title:'Neural Networks: Zero to Hero', provider:'Andrej Karpathy — YouTube'}, {title:'Attention Is All You Need', provider:'arXiv — paper'}] },
+    rl: { title: 'Reinforcement Learning', level: 'Core', tag: 'tag-accent',
+      desc: 'Agents that learn by acting, rewarded for outcomes rather than labels.',
+      items: ['Model an environment as an MDP', 'Implement Q-learning on a grid world', 'Compare on-policy vs off-policy methods'],
+      resources: [{title:'Reinforcement Learning: An Introduction', provider:'Sutton & Barto — book'}, {title:'Spinning Up in Deep RL', provider:'OpenAI — free course'}] },
+    mlops: { title: 'MLOps & Deployment', level: 'Advanced', tag: 'tag-neutral',
+      desc: 'Shipping, monitoring and retraining models safely in production.',
+      items: ['Containerize a trained model', 'Set up drift monitoring', 'Design a retraining pipeline'],
+      resources: [{title:'Designing Machine Learning Systems', provider:"Chip Huyen — book"}, {title:'MLOps Zoomcamp', provider:'DataTalksClub — free course'}] },
+    backprop: { title: 'Backpropagation Deep Dive', level: 'Advanced', tag: 'tag-neutral',
+      desc: 'Deriving gradients and understanding vanishing/exploding gradients.',
+      items: ['Derive backprop for a 2-layer net by hand', 'Diagnose a vanishing-gradient failure', 'Implement gradient checking'],
+      resources: [{title:'CS231n: Backpropagation', provider:'Stanford — lecture'}, {title:'Deep Learning Book, Ch. 6', provider:'Goodfellow et al.'}] },
+    cnntrans: { title: 'CNN vs Transformer Design', level: 'Specialization', tag: 'tag-outline',
+      desc: 'Comparing inductive biases: convolution vs self-attention.',
+      items: ['Implement a small CNN classifier', 'Implement a small ViT', 'Compare data efficiency of both'],
+      resources: [{title:'An Image is Worth 16x16 Words', provider:'arXiv — paper'}, {title:'CNN Explainer', provider:'Interactive doc'}] },
+    policygrad: { title: 'Policy Gradient Methods', level: 'Advanced', tag: 'tag-neutral',
+      desc: 'REINFORCE, actor-critic and why variance reduction matters.',
+      items: ['Implement REINFORCE on CartPole', 'Add a baseline to cut variance', 'Read the PPO paper'],
+      resources: [{title:'Proximal Policy Optimization', provider:'arXiv — paper'}, {title:'Policy Gradient Algorithms', provider:'Lilian Weng — article'}] },
+    multiagent: { title: 'Multi-Agent Systems', level: 'Specialization', tag: 'tag-outline',
+      desc: 'Cooperative and competitive agents learning in shared environments.',
+      items: ['Simulate two competing agents', 'Explore emergent cooperation'],
+      resources: [{title:'Multi-Agent RL: A Selective Survey', provider:'arXiv — paper'}, {title:'PettingZoo Docs', provider:'Farama Foundation'}] },
+  };
+
+  TREES = [
+    { id: 'ml', title: 'Machine Learning Fundamentals', desc: 'From linear algebra to shipping models in production.', percentage: 42, tasksDone: 12, tasksTotal: 29, date: 'Jul 2, 2026', active: true },
+    { id: 'ps', title: 'Public Speaking Mastery', desc: 'Structuring talks, handling nerves, owning the room.', percentage: 100, tasksDone: 18, tasksTotal: 18, date: 'May 14, 2026', active: false },
+    { id: 'be', title: 'Behavioral Economics', desc: 'Why people deviate from rational choice, and how to design for it.', percentage: 38, tasksDone: 8, tasksTotal: 21, date: 'Jun 20, 2026', active: false },
+    { id: 'sd', title: 'System Design Interviews', desc: 'Scaling reads, writes, and everything in between.', percentage: 12, tasksDone: 3, tasksTotal: 25, date: 'Jul 30, 2026', active: false },
+  ];
+
+  goTo = (screen) => this.setState({ screen, selectedNodeId: null });
+  select = (id) => (e) => { e && e.stopPropagation && e.stopPropagation(); this.setState({ selectedNodeId: id }); };
+  stop = (e) => e && e.stopPropagation && e.stopPropagation();
+  toggleCheck = (key) => (e) => {
+    e && e.stopPropagation && e.stopPropagation();
+    this.setState(s => ({ checks: { ...s.checks, [key]: !s.checks[key] } }));
+  };
+
+  tabStyle(active) {
+    return `border:none;border-radius:999px;padding:8px 16px;font-family:var(--font-heading);font-size:13px;cursor:pointer;background:${active ? 'var(--color-accent)' : 'transparent'};color:${active ? 'var(--color-bg)' : 'var(--color-text)'}`;
+  }
+
+  boxStyle(completed, accent) {
+    const c = accent || 'var(--color-accent-2-500)';
+    return `width:20px;height:20px;border-radius:6px;flex:none;display:flex;align-items:center;justify-content:center;border:1.5px solid ${completed ? c : 'var(--color-divider)'};background:${completed ? c : 'transparent'}`;
+  }
+
+  renderVals() {
+    const s = this.state;
+    const screen = s.screen || this.props.initialScreen || 'dashboard';
+    const density = this.props.densityMode || 'comfortable';
+    const cols = density === 'compact' ? 4 : 3;
+
+    const totalTasks = this.TREES.reduce((a, t) => a + t.tasksTotal, 0);
+    const doneTasks = this.TREES.reduce((a, t) => a + t.tasksDone, 0);
+    const avg = Math.round(this.TREES.reduce((a, t) => a + t.percentage, 0) / this.TREES.length);
+    const completedCount = this.TREES.filter(t => t.percentage === 100).length;
+
+    const savedTrees = this.TREES.map(t => {
+      const ringColor = t.percentage === 100 ? 'var(--color-accent-2-500)' : t.percentage >= 40 ? 'var(--color-accent-500)' : 'var(--color-neutral-500)';
+      return {
+        ...t,
+        cardStyle: `cursor:pointer;${t.active ? 'border:1px solid var(--color-accent);' : ''}`,
+        iconBg: t.active ? 'var(--color-accent-100)' : 'var(--color-neutral-100)',
+        iconFg: t.active ? 'var(--color-accent-700)' : 'var(--color-neutral-700)',
+        ringColor,
+        ringOffset: 119.4 * (1 - t.percentage / 100),
+        tasksLabel: `${t.tasksDone}/${t.tasksTotal}`,
+        percentLabel: t.percentage + '%',
+        onOpen: () => this.goTo('tree'),
+        stop: this.stop,
+      };
+    });
+
+    const selectedNode = s.selectedNodeId ? this.NODES[s.selectedNodeId] : null;
+    const selectedNodeVals = selectedNode ? {
+      title: selectedNode.title,
+      levelLabel: selectedNode.level,
+      desc: selectedNode.desc,
+      tagStyle: '',
+      items: selectedNode.items.map((text, i) => {
+        const key = s.selectedNodeId + '_item_' + i;
+        const completed = !!s.checks[key];
+        return { text, completed, toggle: this.toggleCheck(key),
+          boxStyle: this.boxStyle(completed),
+          textStyle: `font-size:13px;${completed ? 'text-decoration:line-through;opacity:.55' : ''}` };
+      }),
+      resources: selectedNode.resources,
+    } : null;
+
+    const filters = ['all', 'youtube', 'book', 'course', 'article', 'paper'];
+    const filterLabels = { all: 'All', youtube: 'Video', book: 'Book', course: 'Course', article: 'Article', paper: 'Paper' };
+    const flat = [];
+    Object.entries(this.NODES).forEach(([nodeId, n]) => {
+      n.resources.forEach((r, i) => {
+        const p = r.provider.toLowerCase();
+        let type = 'article';
+        if (p.includes('youtube')) type = 'youtube';
+        else if (p.includes('book')) type = 'book';
+        else if (p.includes('course')) type = 'course';
+        else if (p.includes('paper') || p.includes('arxiv')) type = 'paper';
+        flat.push({ key: nodeId + '_res_' + i, title: r.title, provider: r.provider, nodeTitle: n.title, type });
+      });
+    });
+    const vaultResources = flat
+      .filter(r => s.vaultFilter === 'all' || r.type === s.vaultFilter)
+      .map(r => {
+        const completed = !!s.checks[r.key];
+        return { ...r, typeLabel: filterLabels[r.type], completed, toggle: this.toggleCheck(r.key), boxStyle: this.boxStyle(completed) };
+      });
+
+    return {
+      isDashboard: screen === 'dashboard',
+      isTree: screen === 'tree',
+      isVault: screen === 'vault',
+      goDashboard: () => this.goTo('dashboard'),
+      goTree: () => this.goTo('tree'),
+      goVault: () => this.goTo('vault'),
+      tabStyleDashboard: this.tabStyle(screen === 'dashboard'),
+      tabStyleTree: this.tabStyle(screen === 'tree'),
+      tabStyleVault: this.tabStyle(screen === 'vault'),
+      openNewModal: () => this.setState({ showNewModal: true }),
+      closeNewModal: () => this.setState({ showNewModal: false }),
+      showNewModal: s.showNewModal,
+      stopClick: this.stop,
+
+      avgCompletion: avg,
+      ringOffsetAvg: 150.8 * (1 - avg / 100),
+      completedCount,
+      totalTrees: this.TREES.length,
+      tasksDone: doneTasks,
+      tasksTotal: totalTasks,
+      dashboardGridStyle: `display:grid;grid-template-columns:repeat(${cols},1fr);gap:20px`,
+      savedTrees,
+
+      selectMathFound: this.select('mathfound'),
+      selectNnarch: this.select('nnarch'),
+      selectRl: this.select('rl'),
+      selectMlops: this.select('mlops'),
+      selectBackprop: this.select('backprop'),
+      selectCnnTrans: this.select('cnntrans'),
+      selectPolicyGrad: this.select('policygrad'),
+      selectMultiAgent: this.select('multiagent'),
+      showExpansionHints: this.props.showExpansionHints ?? true,
+
+      hasSelectedNode: !!selectedNode,
+      selectedNode: selectedNodeVals || { title: '', levelLabel: '', desc: '', items: [], resources: [], tagStyle: '' },
+      closeDrawer: () => this.setState({ selectedNodeId: null }),
+
+      vaultFilters: filters.map(f => ({
+        label: filterLabels[f],
+        style: this.tabStyle(s.vaultFilter === f).replace('padding:8px 16px', 'padding:6px 14px'),
+        onClick: () => this.setState({ vaultFilter: f }),
+      })),
+      vaultResources,
+    };
+  }
+}
+
+</script>
+</body>
+</html>

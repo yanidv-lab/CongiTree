@@ -649,7 +649,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-['Heebo',sans-serif]">
+    <div className="min-h-screen bg-paper text-slate-900 flex flex-col font-['Heebo',sans-serif]">
       {/* App Header */}
       <Header
         currentTree={currentTree}
@@ -693,17 +693,17 @@ export default function App() {
 
         {/* Empty State when no trees exist */}
         {!currentTree ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-lg mx-auto">
-            <div className="w-20 h-20 rounded-3xl bg-linear-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center mb-5 shadow-lg shadow-indigo-200">
-              <GitFork className="w-9 h-9 rotate-90" />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-lg mx-auto font-body">
+            <div className="w-20 h-20 rounded-full bg-accent text-paper flex items-center justify-center mb-5 shadow-elev-md">
+              <GitFork className="w-9 h-9 rotate-90" strokeWidth={2.75} />
             </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2 tracking-tight">{language === 'he' ? 'ברוך הבא ל-CogniTree AI' : 'Welcome to CogniTree AI'}</h2>
-            <p className="text-sm text-slate-600 mb-7 leading-relaxed max-w-sm">
+            <h2 className="font-heading text-2xl text-ink mb-2 tracking-tight">{language === 'he' ? 'ברוך הבא ל-CogniTree AI' : 'Welcome to CogniTree AI'}</h2>
+            <p className="text-sm text-ink/65 mb-7 leading-relaxed max-w-sm">
               {language === 'he' ? 'מערכת חכמה הבונה עצי למידה ויזואליים, מבוססי מקורות מחקריים מאומתים, עם מעקב ירוק/אפור בזמן אמת.' : 'A smart system that builds visual learning trees based on verified sources, with real-time green/gray tracking.'}
             </p>
             <button
               onClick={() => setIsNewModalOpen(true)}
-              className="flex items-center gap-2 px-6 py-3 rounded-2xl bg-linear-to-br from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold text-sm shadow-md shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
+              className="flex items-center gap-2 px-6 py-3 rounded-full bg-accent hover:bg-accent-700 text-paper font-heading text-sm shadow-elev-md transition-all hover:scale-105 active:scale-95"
             >
               <Plus className="w-5 h-5 stroke-[3]" />
               <span>{language === 'he' ? 'צור את עץ הלמידה הראשון שלך' : 'Create your first learning tree'}</span>

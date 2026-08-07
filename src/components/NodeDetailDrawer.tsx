@@ -1,21 +1,18 @@
 import React, { useState } from 'react';
-import { 
-  X, 
-  CheckCircle2, 
-  Circle, 
-  ExternalLink, 
-  Youtube, 
-  GraduationCap, 
-  BookOpen, 
-  FileText, 
-  GitBranchPlus, 
-  Plus, 
-  CheckSquare, 
+import {
+  X,
+  CheckCircle2,
+  Circle,
+  ExternalLink,
+  Youtube,
+  GraduationCap,
+  BookOpen,
+  FileText,
+  GitBranchPlus,
+  Plus,
+  CheckSquare,
   Square,
   Award,
-  Sparkles,
-  Link as LinkIcon,
-  Search,
   Scissors,
   FolderPlus,
   PlusCircle
@@ -40,6 +37,15 @@ interface NodeDetailDrawerProps {
   isLoadingExpand?: boolean;
   language?: 'he' | 'en';
 }
+
+const RESOURCE_TYPE_META: Record<ResourceType, { icon: React.ElementType; labelHe: string; labelEn: string }> = {
+  course_free: { icon: GraduationCap, labelHe: 'edX / Coursera', labelEn: 'edX / Coursera' },
+  course_paid: { icon: Award, labelHe: 'Udemy', labelEn: 'Udemy' },
+  youtube: { icon: Youtube, labelHe: 'YouTube', labelEn: 'YouTube' },
+  book: { icon: BookOpen, labelHe: 'ספר / eBook', labelEn: 'Book / eBook' },
+  article: { icon: FileText, labelHe: 'מאמר אקדמי', labelEn: 'Academic PDF' },
+  doc: { icon: FileText, labelHe: 'תיעוד רשמי', labelEn: 'Official Doc' },
+};
 
 export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
   node,
@@ -76,6 +82,7 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
   if (!node) return null;
 
   const isCompleted = node.completed;
+  const isRoot = node.id === rootNodeId;
 
   const itemsCompletedCount = node.items.filter(i => i.completed).length;
   const resCompletedCount = node.resources.filter(r => r.completed).length;
@@ -123,141 +130,54 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="w-full max-w-xl bg-white border-l border-slate-200 h-full flex flex-col shadow-2xl overflow-hidden text-slate-900">
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink/35 backdrop-blur-sm animate-in fade-in duration-200" onClick={onClose}>
+      <div className="w-full max-w-[420px] bg-paper border-l border-ink/10 h-full flex flex-col shadow-elev-lg overflow-hidden font-body" onClick={(e) => e.stopPropagation()}>
         {/* Drawer Header */}
-        <div className={`px-6 py-5 border-b flex items-center justify-between ${
-          isCompleted ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'
-        }`}>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${
-                node.level === 'foundation' ? 'bg-sky-50 text-sky-700 border-sky-200' :
-                node.level === 'core' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
-                node.level === 'advanced' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                'bg-teal-50 text-teal-700 border-teal-200'
-              }`}>
-                {node.level === 'foundation' ? (language === 'he' ? 'יסודות / דרישת קדם' : 'Foundation / Prerequisite') :
-                 node.level === 'core' ? (language === 'he' ? 'נושא ליבה' : 'Core Topic') :
-                 node.level === 'advanced' ? (language === 'he' ? 'נושא מתקדם' : 'Advanced Topic') : (language === 'he' ? 'התמחות' : 'Specialization')}
-              </span>
+        <div className="px-6 py-[22px] border-b border-ink/10 flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <span className={`inline-block text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+              isRoot ? 'border border-ink/25 text-ink/70' :
+              node.level === 'foundation' ? 'bg-sage-100 text-sage-800' :
+              node.level === 'core' ? 'bg-accent-100 text-accent-800' :
+              node.level === 'advanced' ? 'bg-sand-200 text-sand-800' :
+              'border border-ink/20 text-ink/70'
+            }`}>
+              {isRoot ? (language === 'he' ? 'נושא שורש' : 'Root topic') :
+               node.level === 'foundation' ? (language === 'he' ? 'יסודות / דרישת קדם' : 'Foundation / Prerequisite') :
+               node.level === 'core' ? (language === 'he' ? 'נושא ליבה' : 'Core Topic') :
+               node.level === 'advanced' ? (language === 'he' ? 'נושא מתקדם' : 'Advanced Topic') : (language === 'he' ? 'התמחות' : 'Specialization')}
+            </span>
 
-              {/* Green / Gray Status */}
-              <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full flex items-center gap-1.5 ${
-                isCompleted 
-                  ? 'bg-emerald-500 text-white shadow-sm' 
-                  : 'bg-slate-100 text-slate-700 border border-slate-200'
-              }`}>
-                {isCompleted ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 fill-white stroke-emerald-500" />
-                    <span>{language === 'he' ? 'ענף הושלם' : 'Completed'}</span>
-                  </>
-                ) : (
-                  <>
-                    <Circle className="w-3.5 h-3.5 text-slate-400" />
-                    <span>{language === 'he' ? 'בתהליך למידה' : 'In Progress'}</span>
-                  </>
-                )}
-              </span>
-            </div>
+            <h2 className="font-heading text-xl text-ink">{node.title}</h2>
+            <p className="text-[13px] text-ink/60 leading-relaxed">{node.description}</p>
 
-            <h2 className="text-xl font-bold text-slate-900">{node.title}</h2>
+            <span className={`inline-flex items-center gap-1.5 text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
+              isCompleted ? 'bg-sage-500 text-paper' : 'bg-panel text-ink/70'
+            }`}>
+              {isCompleted ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5" strokeWidth={2.75} />
+                  <span>{language === 'he' ? 'ענף הושלם' : 'Completed'}</span>
+                </>
+              ) : (
+                <>
+                  <Circle className="w-3.5 h-3.5 text-ink/35" strokeWidth={2.75} />
+                  <span>{language === 'he' ? 'בתהליך למידה' : 'In Progress'}</span>
+                </>
+              )}
+            </span>
           </div>
 
           <button
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+            className="p-2 rounded-full text-ink/50 hover:text-ink hover:bg-panel transition-colors shrink-0"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" strokeWidth={2.75} />
           </button>
         </div>
 
         {/* Drawer Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* Node Description & Purpose */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-              {language === 'he' ? 'הקשר ומהות הנושא' : 'Context & Core Concept'}
-            </h3>
-            <p className="text-sm text-slate-700 leading-relaxed">{node.description}</p>
-          </div>
-
-          {/* Action: Expand Sub-Branches & Add Custom Branch */}
-          <div className="bg-indigo-50/80 border border-indigo-100 rounded-2xl p-4 space-y-3 shadow-xs">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-bold text-indigo-700 mb-0.5">
-                <Sparkles className="w-4 h-4" />
-                <span>{language === 'he' ? 'פיתוח והרחבת ענפים לענף זה' : 'Expand & Develop Branch'}</span>
-              </div>
-              <p className="text-xs text-slate-600">
-                {language === 'he'
-                  ? 'בחר כיצד ברצונך להעמיק ולפתח ענף זה: צור ענפים חכמים עם AI או הוסף ענף מותאם אישית ביוזמתך.'
-                  : 'Choose how to expand this branch: generate AI sub-branches or add custom manual sub-branches.'}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1 flex-wrap">
-              <button
-                onClick={() => onExpandNode(node)}
-                disabled={isLoadingExpand || node.expansionExhausted}
-                className="flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-all active:scale-95 disabled:opacity-50 shadow-sm"
-                title={node.expansionExhausted ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand') : undefined}
-              >
-                <GitBranchPlus className="w-4 h-4" />
-                <span>
-                  {isLoadingExpand
-                    ? (language === 'he' ? 'מרחיב ענפים...' : 'Expanding...')
-                    : node.expansionExhausted
-                    ? (language === 'he' ? 'סוף נושא - אין עוד תתי-נושאים' : 'End of Topic - No More Sub-Topics')
-                    : (language === 'he' ? 'הרחבה חכמה עם AI' : 'Smart AI Expansion')}
-                </span>
-              </button>
-
-              {onOpenCustomBranchModal && (
-                <button
-                  onClick={() => onOpenCustomBranchModal(node)}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-800 font-bold text-xs transition-all active:scale-95 shadow-2xs"
-                >
-                  <PlusCircle className="w-4 h-4 text-indigo-600" />
-                  <span>{language === 'he' ? '+ ענף מותאם אישית' : '+ Custom Branch'}</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Advanced Structural Operations: Promote & Prune */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-2.5">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
-              {language === 'he' ? 'פעולות מבניות מתקדמות' : 'Advanced Structural Operations'}
-            </h3>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Promote to Standalone Project */}
-              {onPromoteNodeToTree && node.id !== rootNodeId && (
-                <button
-                  onClick={() => setConfirmAction({ type: 'promote' })}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-indigo-50 border border-slate-200 text-indigo-700 font-bold text-xs transition-all shadow-2xs"
-                  title={language === 'he' ? "ייצא ענף זה והופך אותו לפרויקט עץ עצמאי במאגר" : "Promote this branch into a new independent subject tree"}
-                >
-                  <FolderPlus className="w-4 h-4 text-indigo-600" />
-                  <span>{language === 'he' ? 'הפוך לפרויקט עצמאי' : 'Make Independent Tree'}</span>
-                </button>
-              )}
-
-              {/* Prune Branch */}
-              {onPruneNode && node.id !== rootNodeId && (
-                <button
-                  onClick={() => setConfirmAction({ type: 'prune' })}
-                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white hover:bg-red-50 border border-slate-200 text-red-600 font-bold text-xs transition-all shadow-2xs"
-                  title={language === 'he' ? "גדע ענף זה מהעץ (הסר אותו ואת תת-הענפים שלו)" : "Cut / Prune this branch and sub-branches from the tree"}
-                >
-                  <Scissors className="w-4 h-4 text-red-600" />
-                  <span>{language === 'he' ? 'גדע ענף זה מהעץ' : 'Cut / Prune Branch'}</span>
-                </button>
-              )}
-            </div>
-          </div>
+        <div className="flex-1 overflow-y-auto p-6 space-y-[22px]">
 
           {/* Confirmation Modal */}
           {confirmAction && (
@@ -270,7 +190,7 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
               }
               message={
                 confirmAction.type === 'promote'
-                  ? (language === 'he' 
+                  ? (language === 'he'
                       ? `האם להפוך את הענף "${node.title}" וכל תתי-הענפים שתחתיו לעץ למידה עצמאי ונפרד במאגר?`
                       : `Promote branch "${node.title}" and its sub-branches into an independent learning tree?`)
                   : (language === 'he'
@@ -299,34 +219,28 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
 
           {/* Sub-Topics Checklist */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>{language === 'he' ? 'נושאים ויעדי למידה' : 'Learning Topics & Goals'}</span>
-                <span className="text-xs text-indigo-700 font-semibold bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
-                  {itemsCompletedCount} / {node.items.length} {language === 'he' ? 'הושלמו' : 'completed'}
-                </span>
-              </h3>
+            <div className="flex items-center justify-between mb-2.5">
+              <h6 className="text-[13px] uppercase tracking-[0.08em] text-ink/50 font-semibold">
+                {language === 'he' ? 'משימות ויעדי למידה' : 'Checklist'}
+              </h6>
+              <span className="text-[11px] text-ink/50 font-semibold">
+                {itemsCompletedCount} / {node.items.length}
+              </span>
             </div>
 
-            <div className="space-y-2 mb-3">
+            <div className="flex flex-col gap-2 mb-3">
               {node.items.map((item) => (
                 <div
                   key={item.id}
                   onClick={() => onToggleItem(node.id, item.id)}
-                  className={`flex items-start gap-3 p-3 rounded-xl border transition-all cursor-pointer ${
-                    item.completed
-                      ? 'bg-emerald-50/60 border-emerald-200 text-emerald-900'
-                      : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300'
-                  }`}
+                  className="flex items-center gap-2.5 cursor-pointer group"
                 >
-                  <button className="mt-0.5 shrink-0 text-emerald-600">
-                    {item.completed ? (
-                      <CheckSquare className="w-5 h-5 fill-emerald-500 text-white" />
-                    ) : (
-                      <Square className="w-5 h-5 text-slate-400" />
-                    )}
-                  </button>
-                  <span className={`text-xs leading-relaxed ${item.completed ? 'line-through text-slate-400' : ''}`}>
+                  <span className={`w-5 h-5 rounded-md shrink-0 flex items-center justify-center border-[1.5px] transition-colors ${
+                    item.completed ? 'bg-sage-500 border-sage-500' : 'border-ink/25 group-hover:border-accent-400'
+                  }`}>
+                    {item.completed && <CheckCircle2 className="w-3.5 h-3.5 text-paper" strokeWidth={3} />}
+                  </span>
+                  <span className={`text-[13px] leading-relaxed ${item.completed ? 'line-through opacity-55 text-ink' : 'text-ink'}`}>
                     {item.text}
                   </span>
                 </div>
@@ -340,12 +254,12 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
                 value={newItemText}
                 onChange={(e) => setNewItemText(e.target.value)}
                 placeholder={language === 'he' ? "+ הוסף תת-נושא ללמידה..." : "+ Add learning topic..."}
-                className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+                className="flex-1 bg-panel/50 border border-ink/15 rounded-full px-4 py-2 text-xs text-ink placeholder-ink/40 focus:outline-none focus:border-accent"
               />
               <button
                 type="submit"
                 disabled={!newItemText.trim()}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold disabled:opacity-40 shadow-xs"
+                className="px-4 py-2 rounded-full bg-accent hover:bg-accent-700 text-paper text-xs font-heading disabled:opacity-40 transition-colors"
               >
                 {language === 'he' ? 'הוסף' : 'Add'}
               </button>
@@ -354,39 +268,34 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
 
           {/* Verified Resources Section */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>{language === 'he' ? 'מקורות למידה מחקריים ומאומתים' : 'Verified Academic Learning Sources'}</span>
-                <span className="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                  {resCompletedCount} / {node.resources.length} {language === 'he' ? 'נקראו' : 'completed'}
-                </span>
-              </h3>
+            <div className="flex items-center justify-between mb-2.5">
+              <h6 className="text-[13px] uppercase tracking-[0.08em] text-ink/50 font-semibold">
+                {language === 'he' ? 'מקורות למידה' : 'Resources'}
+              </h6>
               <button
                 onClick={() => setShowAddResForm(!showAddResForm)}
-                className="text-xs text-indigo-600 hover:underline flex items-center gap-1 font-semibold"
+                className="text-[11px] text-accent-700 hover:underline flex items-center gap-1 font-semibold"
               >
-                <Plus className="w-3.5 h-3.5" />
+                <Plus className="w-3.5 h-3.5" strokeWidth={2.75} />
                 <span>{language === 'he' ? 'הוסף מקור' : 'Add Source'}</span>
               </button>
             </div>
 
             {/* Resource Type Filter Tabs */}
-            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs mb-3 overflow-x-auto">
+            <div className="flex items-center gap-1 bg-panel border border-ink/10 p-1 rounded-full text-xs mb-3 overflow-x-auto scrollbar-none">
               {[
                 { id: 'all', label: language === 'he' ? 'הכל' : 'All' },
-                { id: 'course_free', label: language === 'he' ? '🎓 edX/Coursera' : '🎓 edX/Coursera' },
-                { id: 'course_paid', label: language === 'he' ? '🏆 Udemy' : '🏆 Udemy' },
-                { id: 'youtube', label: language === 'he' ? '🎥 YouTube' : '🎥 YouTube' },
-                { id: 'book', label: language === 'he' ? '📚 ספרים ו-eBooks' : '📚 Books & eBooks' },
-                { id: 'paper_doc', label: language === 'he' ? '📄 PDFs ומאמרים' : '📄 PDFs & Papers' },
+                { id: 'course_free', label: language === 'he' ? 'edX/Coursera' : 'edX/Coursera' },
+                { id: 'course_paid', label: language === 'he' ? 'Udemy' : 'Udemy' },
+                { id: 'youtube', label: language === 'he' ? 'YouTube' : 'YouTube' },
+                { id: 'book', label: language === 'he' ? 'ספרים' : 'Books' },
+                { id: 'paper_doc', label: language === 'he' ? 'PDFs' : 'PDFs' },
               ].map(tab => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveResTab(tab.id)}
-                  className={`px-3 py-1 rounded-lg transition-all text-[11px] font-medium whitespace-nowrap ${
-                    activeResTab === tab.id
-                      ? 'bg-white text-indigo-700 font-bold shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
+                  className={`px-3 py-1.5 rounded-full transition-colors text-[11px] font-heading whitespace-nowrap ${
+                    activeResTab === tab.id ? 'bg-accent text-paper' : 'text-ink/60 hover:text-ink'
                   }`}
                 >
                   {tab.label}
@@ -394,10 +303,10 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
               ))}
             </div>
 
-            {/* Add Resource Form Modal */}
+            {/* Add Resource Form */}
             {showAddResForm && (
-              <form onSubmit={handleAddResourceSubmit} className="bg-slate-50 border border-slate-200 rounded-2xl p-4 mb-4 space-y-3">
-                <div className="text-xs font-bold text-slate-900">
+              <form onSubmit={handleAddResourceSubmit} className="bg-panel/50 border border-ink/10 rounded-panel p-4 mb-4 space-y-3">
+                <div className="text-xs font-bold text-ink">
                   {language === 'he' ? 'הוסף מקור למידה חדש' : 'Add New Learning Source'}
                 </div>
                 <input
@@ -405,7 +314,7 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
                   value={resTitle}
                   onChange={e => setResTitle(e.target.value)}
                   placeholder={language === 'he' ? "שם הקורס, הספר או המאמר..." : "Course, book, or paper title..."}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-paper border border-ink/15 rounded-full px-3.5 py-2 text-xs text-ink focus:outline-none focus:border-accent"
                   required
                 />
                 <input
@@ -413,7 +322,7 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
                   value={resUrl}
                   onChange={e => setResUrl(e.target.value)}
                   placeholder={language === 'he' ? "קישור ישיר (URL)..." : "Direct URL link..."}
-                  className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                  className="w-full bg-paper border border-ink/15 rounded-full px-3.5 py-2 text-xs text-ink focus:outline-none focus:border-accent"
                 />
                 <div className="grid grid-cols-2 gap-2">
                   <input
@@ -421,32 +330,32 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
                     value={resProvider}
                     onChange={e => setResProvider(e.target.value)}
                     placeholder={language === 'he' ? "ספק (MIT, edX, Coursera, Udemy)" : "Provider (MIT, edX, Coursera, Udemy)"}
-                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                    className="bg-paper border border-ink/15 rounded-full px-3.5 py-2 text-xs text-ink focus:outline-none focus:border-accent"
                   />
                   <select
                     value={resType}
                     onChange={e => setResType(e.target.value as any)}
-                    className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-indigo-500"
+                    className="bg-paper border border-ink/15 rounded-full px-3.5 py-2 text-xs text-ink focus:outline-none focus:border-accent"
                   >
-                    <option value="course_free">{language === 'he' ? '🎓 קורס אוניברסיטאי (edX/Coursera)' : '🎓 University Course (edX/Coursera)'}</option>
-                    <option value="course_paid">{language === 'he' ? '🏆 קורס מעשי (Udemy)' : '🏆 Practical Course (Udemy)'}</option>
-                    <option value="youtube">{language === 'he' ? '🎥 הרצאת YouTube' : '🎥 YouTube Video'}</option>
-                    <option value="book">{language === 'he' ? '📚 ספר לימוד / eBook (OpenStax)' : '📚 Textbook & eBook'}</option>
-                    <option value="article">{language === 'he' ? '📄 מאמר מחקרי / PDF (Google Scholar)' : '📄 Academic Paper / PDF'}</option>
-                    <option value="doc">{language === 'he' ? '📝 תיעוד רשמי (Official Docs)' : '📝 Official Documentation'}</option>
+                    <option value="course_free">{language === 'he' ? 'קורס אוניברסיטאי (edX/Coursera)' : 'University Course (edX/Coursera)'}</option>
+                    <option value="course_paid">{language === 'he' ? 'קורס מעשי (Udemy)' : 'Practical Course (Udemy)'}</option>
+                    <option value="youtube">{language === 'he' ? 'הרצאת YouTube' : 'YouTube Video'}</option>
+                    <option value="book">{language === 'he' ? 'ספר לימוד / eBook' : 'Textbook & eBook'}</option>
+                    <option value="article">{language === 'he' ? 'מאמר מחקרי / PDF' : 'Academic Paper / PDF'}</option>
+                    <option value="doc">{language === 'he' ? 'תיעוד רשמי' : 'Official Documentation'}</option>
                   </select>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => setShowAddResForm(false)}
-                    className="px-3 py-1.5 rounded-lg text-xs text-slate-500 hover:text-slate-800"
+                    className="px-3.5 py-1.5 rounded-full text-xs text-ink/60 hover:text-ink"
                   >
                     {language === 'he' ? 'ביטול' : 'Cancel'}
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-indigo-600 text-white font-bold text-xs shadow-xs"
+                    className="px-4 py-1.5 rounded-full bg-accent hover:bg-accent-700 text-paper font-heading text-xs transition-colors"
                   >
                     {language === 'he' ? 'שמור מקור' : 'Save Source'}
                   </button>
@@ -455,103 +364,146 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
             )}
 
             {/* Resource List */}
-            <div className="space-y-3">
+            <div className="flex flex-col gap-2">
               {filteredResources.length === 0 ? (
-                <div className="text-center py-6 text-xs text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+                <div className="text-center py-6 text-xs text-ink/45 bg-panel/40 rounded-panel border border-ink/10">
                   {language === 'he' ? 'אין מקורות בקטגוריה זו עדיין' : 'No sources in this category yet'}
                 </div>
               ) : (
-                filteredResources.map((res) => (
-                  <div
-                    key={res.id}
-                    className={`p-3.5 rounded-2xl border transition-all ${
-                      res.completed
-                        ? 'bg-emerald-50/50 border-emerald-200'
-                        : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-start gap-2.5">
-                        <button
-                          onClick={() => onToggleResource(node.id, res.id)}
-                          className="mt-0.5 text-emerald-600 shrink-0"
-                          title={language === 'he' ? "סמן כנקרא/הושלם" : "Mark completed"}
-                        >
-                          {res.completed ? (
-                            <CheckSquare className="w-5 h-5 fill-emerald-500 text-white" />
-                          ) : (
-                            <Square className="w-5 h-5 text-slate-400" />
-                          )}
-                        </button>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap mb-1">
-                            {res.type === 'course_free' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1"><GraduationCap className="w-3 h-3"/> edX / Coursera</span>}
-                            {res.type === 'course_paid' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 flex items-center gap-1"><Award className="w-3 h-3"/> Udemy</span>}
-                            {res.type === 'youtube' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 flex items-center gap-1"><Youtube className="w-3 h-3"/> YouTube</span>}
-                            {res.type === 'book' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1"><BookOpen className="w-3 h-3"/> Book / eBook</span>}
-                            {res.type === 'article' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1"><FileText className="w-3 h-3"/> Academic PDF</span>}
-                            {res.type === 'doc' && <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-teal-50 text-teal-700 border border-teal-200 flex items-center gap-1"><FileText className="w-3 h-3"/> Official Doc</span>}
-
-                            {res.provider && (
-                              <span className="text-[10px] text-indigo-600 font-semibold">
-                                • {res.provider}
+                filteredResources.map((res) => {
+                  const meta = RESOURCE_TYPE_META[res.type];
+                  const TypeIcon = meta.icon;
+                  return (
+                    <div
+                      key={res.id}
+                      className={`p-3 rounded-panel border transition-all ${
+                        res.completed ? 'bg-sage-100/60 border-sage-300' : 'bg-panel/40 border-ink/10 hover:border-accent-300'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          <button
+                            onClick={() => onToggleResource(node.id, res.id)}
+                            className="mt-0.5 shrink-0"
+                            title={language === 'he' ? "סמן כנקרא/הושלם" : "Mark completed"}
+                          >
+                            <span className={`w-5 h-5 rounded-md flex items-center justify-center border-[1.5px] transition-colors ${
+                              res.completed ? 'bg-sage-500 border-sage-500' : 'border-ink/25'
+                            }`}>
+                              {res.completed && <CheckCircle2 className="w-3.5 h-3.5 text-paper" strokeWidth={3} />}
+                            </span>
+                          </button>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-panel text-ink/65 flex items-center gap-1">
+                                <TypeIcon className="w-3 h-3 text-accent-600" strokeWidth={2.75} />
+                                {language === 'he' ? meta.labelHe : meta.labelEn}
                               </span>
-                            )}
+                              {res.provider && (
+                                <span className="text-[10px] text-ink/50 font-semibold">&middot; {res.provider}</span>
+                              )}
+                              {res.isVerifiedAcademic && (
+                                <span className="text-[9px] font-bold text-sand-800 bg-sand-200 px-1.5 py-0.5 rounded-full">
+                                  {language === 'he' ? 'מאומת' : 'Verified'}
+                                </span>
+                              )}
+                            </div>
 
-                            {res.isVerifiedAcademic && (
-                              <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200 flex items-center gap-0.5" title="מקור מחקרי/אקדמי אמין ומאומת">
-                                <Award className="w-2.5 h-2.5 text-amber-600" /> {language === 'he' ? 'מאומת' : 'Verified'}
-                              </span>
+                            <h4 className={`text-[13px] font-bold leading-snug ${res.completed ? 'line-through opacity-55 text-ink' : 'text-ink'}`}>
+                              {res.title}
+                            </h4>
+
+                            {res.description && (
+                              <p className="text-[11px] text-ink/55 mt-1 leading-relaxed">
+                                {res.description}
+                              </p>
                             )}
                           </div>
-
-                          <h4 className={`text-xs font-bold leading-snug ${res.completed ? 'line-through text-slate-400' : 'text-slate-900'}`}>
-                            {res.title}
-                          </h4>
-
-                          {res.description && (
-                            <p className="text-[11px] text-slate-600 mt-1 leading-relaxed">
-                              {res.description}
-                            </p>
-                          )}
                         </div>
-                      </div>
 
-                      {/* Direct External Link */}
-                      {res.url && (
-                        <a
-                          href={res.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          referrerPolicy="no-referrer"
-                          className="p-2 rounded-xl bg-slate-100 hover:bg-indigo-600 hover:text-white text-slate-700 border border-slate-200 transition-all shrink-0 flex items-center gap-1 text-[11px] font-semibold shadow-xs"
-                          title={language === 'he' ? "פתח מקור זה בחלון חדש" : "Open source in new tab"}
-                        >
-                          <span>{language === 'he' ? 'פתח' : 'Open'}</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
-                      )}
+                        {res.url && (
+                          <a
+                            href={res.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            referrerPolicy="no-referrer"
+                            className="p-2 rounded-full bg-panel hover:bg-accent hover:text-paper text-ink/60 transition-colors shrink-0"
+                            title={language === 'he' ? "פתח מקור זה בחלון חדש" : "Open source in new tab"}
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" strokeWidth={2.75} />
+                          </a>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
 
           {/* Personal Notes */}
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 mb-2">
-              {language === 'he' ? 'הערות אישיות לנושא זה' : 'Personal Notes for Topic'}
-            </h3>
+          <div className="field">
+            <label className="text-[13px] uppercase tracking-[0.08em] text-ink/50 font-semibold block mb-2.5">
+              {language === 'he' ? 'ההערות שלך' : 'Your notes'}
+            </label>
             <textarea
               value={notesText}
               onChange={(e) => setNotesText(e.target.value)}
               onBlur={handleNotesBlur}
-              placeholder={language === 'he' ? "כתוב תובנות, סיכומים או תזכורות אישיות על נושא זה..." : "Write insights, summaries, or notes for this topic..."}
+              placeholder={language === 'he' ? "כתוב תובנות, סיכומים או תזכורות אישיות על נושא זה..." : "Jot down what clicked, what didn't..."}
               rows={3}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-panel/50 border border-ink/15 rounded-panel p-3 text-xs text-ink placeholder-ink/40 focus:outline-none focus:border-accent"
             />
           </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="px-6 py-4 border-t border-ink/10 flex items-center gap-2">
+          <button
+            onClick={() => onExpandNode(node)}
+            disabled={isLoadingExpand || node.expansionExhausted}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-full bg-accent hover:bg-accent-700 text-paper font-heading text-xs transition-all active:scale-95 disabled:opacity-50"
+            title={node.expansionExhausted ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand') : undefined}
+          >
+            <GitBranchPlus className="w-3.5 h-3.5" strokeWidth={2.75} />
+            <span>
+              {isLoadingExpand
+                ? (language === 'he' ? 'מרחיב...' : 'Expanding...')
+                : node.expansionExhausted
+                ? (language === 'he' ? 'סוף נושא' : 'End of Topic')
+                : (language === 'he' ? 'גדל ענף' : 'Grow branch')}
+            </span>
+          </button>
+
+          {onOpenCustomBranchModal && (
+            <button
+              onClick={() => onOpenCustomBranchModal(node)}
+              className="p-2.5 rounded-full border border-ink/15 text-ink/70 hover:bg-panel transition-colors"
+              title={language === 'he' ? "הוסף ענף מותאם אישית תחת נושא זה" : "Add custom branch"}
+            >
+              <PlusCircle className="w-4 h-4" strokeWidth={2.75} />
+            </button>
+          )}
+
+          {onPromoteNodeToTree && !isRoot && (
+            <button
+              onClick={() => setConfirmAction({ type: 'promote' })}
+              className="px-3.5 py-2.5 rounded-full border border-ink/15 text-ink/80 hover:bg-panel font-heading text-xs transition-colors"
+              title={language === 'he' ? "ייצא ענף זה והופך אותו לפרויקט עץ עצמאי במאגר" : "Promote this branch into a new independent subject tree"}
+            >
+              {language === 'he' ? 'פצל לעץ' : 'Split off'}
+            </button>
+          )}
+
+          {onPruneNode && !isRoot && (
+            <button
+              onClick={() => setConfirmAction({ type: 'prune' })}
+              className="p-2.5 rounded-full border border-ink/15 text-red-700 hover:bg-red-50 transition-colors"
+              title={language === 'he' ? "גדע ענף זה מהעץ" : "Prune branch"}
+            >
+              <Scissors className="w-4 h-4" strokeWidth={2.75} />
+            </button>
+          )}
         </div>
       </div>
     </div>
