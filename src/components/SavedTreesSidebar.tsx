@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { LearningTree } from '../types';
 import { calculateTreeProgress } from '../lib/treeStore';
-import { ProgressRing } from './DashboardView';
+import { ProgressRing } from './ProgressRing';
 import { ConfirmModal } from './ConfirmModal';
 
 interface SavedTreesSidebarProps {

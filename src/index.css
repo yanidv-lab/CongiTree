@@ -1,5 +1,61 @@
 @import "tailwindcss";
 
+/*
+ * "Organic" design tokens (recolored: mature slate-blue accent in place of the system's
+ * default terracotta; sage kept as the secondary accent) - see design/cognitree-redesign/.
+ * Scoped under new color/radius/shadow names (paper/panel/ink/accent/sage/sand, rounded-card,
+ * shadow-elev-*) rather than overriding Tailwind's built-in slate/neutral/shadow-sm/rounded-lg
+ * etc., so components that aren't part of this redesign keep their existing look untouched.
+ */
+@theme {
+  --font-heading: "Caprasimo", "Heebo", sans-serif;
+  --font-body: "Figtree", "Heebo", sans-serif;
+
+  --color-paper: #f5ead8;
+  --color-panel: #ebddc5;
+  --color-ink: #201e1d;
+
+  --color-accent: #3b5266;
+  --color-accent-100: #eef1f5;
+  --color-accent-200: #dbe3ea;
+  --color-accent-300: #b7c6d3;
+  --color-accent-400: #8aa1b6;
+  --color-accent-500: #5c7791;
+  --color-accent-600: #455f78;
+  --color-accent-700: #33485f;
+  --color-accent-800: #243444;
+  --color-accent-900: #16212c;
+
+  --color-sage-100: #eef1e6;
+  --color-sage-200: #dbe2c9;
+  --color-sage-300: #b9c69c;
+  --color-sage-400: #97a97a;
+  --color-sage-500: #7a8a5e;
+  --color-sage-600: #647047;
+  --color-sage-700: #4f5837;
+  --color-sage-800: #383f27;
+  --color-sage-900: #22271a;
+
+  --color-sand-100: #efe6d5;
+  --color-sand-200: #e1d3ba;
+  --color-sand-300: #cdb999;
+  --color-sand-400: #ab9777;
+  --color-sand-500: #8a7a5f;
+  --color-sand-600: #6c5f4a;
+  --color-sand-700: #524738;
+  --color-sand-800: #392f24;
+  --color-sand-900: #201e1d;
+
+  --radius-chip: 8px;
+  --radius-panel: 16px;
+  --radius-card: 28px;
+  --radius-dialog: 32px;
+
+  --shadow-elev-sm: 0 1px 2px color-mix(in srgb, #201e1d 6%, transparent), 0 1px 1px color-mix(in srgb, #201e1d 4%, transparent);
+  --shadow-elev-md: 0 6px 16px color-mix(in srgb, #201e1d 10%, transparent), 0 2px 6px color-mix(in srgb, #201e1d 6%, transparent);
+  --shadow-elev-lg: 0 16px 40px color-mix(in srgb, #201e1d 16%, transparent), 0 4px 12px color-mix(in srgb, #201e1d 8%, transparent);
+}
+
 @layer utilities {
   .scrollbar-none {
     -ms-overflow-style: none;

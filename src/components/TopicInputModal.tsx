@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, X, BookOpen, Layers, Compass, Loader2, Search, CheckCircle2, Shuffle } from 'lucide-react';
+import { Sparkles, X, Loader2, Search, Shuffle } from 'lucide-react';
 
 interface TopicInputModalProps {
   isOpen: boolean;
@@ -49,7 +49,7 @@ export const TopicInputModal: React.FC<TopicInputModalProps> = ({
   const [topic, setTopic] = useState('');
   const [depthLevel, setDepthLevel] = useState<'basic' | 'comprehensive' | 'mastery'>('comprehensive');
   const [customInstructions, setCustomInstructions] = useState('');
-  
+
   const currentPresets = language === 'he' ? ALL_PRESET_TOPICS_HE : ALL_PRESET_TOPICS_EN;
   const [displayedPresets, setDisplayedPresets] = useState(currentPresets.slice(0, 6));
 
@@ -78,25 +78,25 @@ export const TopicInputModal: React.FC<TopicInputModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-white border border-slate-200 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden text-slate-900 flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/35 backdrop-blur-md animate-in fade-in duration-200" onClick={onClose}>
+      <div className="bg-paper border border-ink/10 rounded-dialog w-full max-w-xl shadow-elev-lg overflow-hidden flex flex-col max-h-[90vh] font-body" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-white">
+        <div className="px-6 py-5 border-b border-ink/10 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-indigo-50 border border-indigo-100 text-indigo-700 flex items-center justify-center shrink-0">
-              <Sparkles className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-full bg-accent-100 text-accent-700 flex items-center justify-center shrink-0">
+              <Sparkles className="w-4.5 h-4.5" strokeWidth={2.75} />
             </div>
             <div>
-              <h2 className="text-base font-bold text-slate-900">{language === 'he' ? 'צור עץ למידה חדש' : 'Create New Learning Tree'}</h2>
-              <p className="text-xs text-slate-500">{language === 'he' ? 'CogniTree AI יבנה מפה ויזואלית עם מקורות מחקריים מאומתים' : 'CogniTree AI will generate a visual map with verified learning resources'}</p>
+              <h2 className="font-heading text-base text-ink">{language === 'he' ? 'צור עץ למידה חדש' : 'Start a new learning tree'}</h2>
+              <p className="text-xs text-ink/55">{language === 'he' ? 'CogniTree AI יבנה מפה ויזואלית עם מקורות מחקריים מאומתים' : 'CogniTree AI will generate a visual map with verified learning resources'}</p>
             </div>
           </div>
           {!isLoading && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"
+              className="p-2 rounded-full text-ink/50 hover:text-ink hover:bg-panel transition-colors shrink-0"
             >
-              <X className="w-5 h-5" />
+              <X className="w-4 h-4" strokeWidth={2.75} />
             </button>
           )}
         </div>
@@ -104,38 +104,38 @@ export const TopicInputModal: React.FC<TopicInputModalProps> = ({
         {/* Content Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
           {/* Main Topic Input */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              {language === 'he' ? 'מהו הנושא או התחום שתרצה להעמיק וללמוד?' : 'What topic or domain would you like to master?'} <span className="text-indigo-600">*</span>
+          <div className="field">
+            <label className="block text-xs font-semibold text-ink/70 mb-2">
+              {language === 'he' ? 'מהו הנושא או התחום שתרצה להעמיק וללמוד?' : 'Topic'} <span className="text-accent-700">*</span>
             </label>
             <div className="relative">
               <input
                 type="text"
                 value={topic}
                 onChange={(e) => setTopic(e.target.value)}
-                placeholder={language === 'he' ? "למשל: יסודות הבינה המלאכותית, אסטרופיזיקה, תיאוריה מוזיקלית..." : "e.g. Artificial Intelligence Basics, Astrophysics, Music Theory..."}
+                placeholder={language === 'he' ? "למשל: יסודות הבינה המלאכותית, אסטרופיזיקה, תיאוריה מוזיקלית..." : "e.g. Distributed Systems, Behavioral Economics..."}
                 disabled={isLoading}
-                className={`w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 transition-all shadow-2xs ${language === 'he' ? 'pr-10' : 'pl-10'}`}
+                className={`w-full bg-panel/40 border border-ink/15 rounded-full px-4 py-3 text-sm text-ink placeholder-ink/40 focus:outline-none focus:border-accent transition-all ${language === 'he' ? 'pr-10' : 'pl-10'}`}
                 autoFocus
                 dir="auto"
               />
-              <Search className={`w-4 h-4 text-slate-400 absolute top-3.5 ${language === 'he' ? 'right-3.5' : 'left-3.5'}`} />
+              <Search className={`w-4 h-4 text-ink/35 absolute top-3.5 ${language === 'he' ? 'right-3.5' : 'left-3.5'}`} strokeWidth={2.5} />
             </div>
           </div>
 
           {/* Preset Recommendation Chips */}
           <div>
             <div className="flex items-center justify-between mb-2">
-              <span className="block text-[11px] font-medium text-slate-500">
+              <span className="block text-[11px] font-medium text-ink/50">
                 {language === 'he' ? 'או בחר מתוך נושאים פופולריים:' : 'Or choose from popular topics:'}
               </span>
               <button
                 type="button"
                 onClick={shufflePresets}
                 disabled={isLoading}
-                className="flex items-center gap-1 text-[10px] text-indigo-600 hover:text-indigo-700 font-medium px-2 py-1 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors"
+                className="flex items-center gap-1 text-[10px] text-accent-700 hover:text-accent-800 font-medium px-2.5 py-1 bg-accent-100 hover:bg-accent-200 rounded-full transition-colors"
               >
-                <Shuffle className="w-3 h-3" />
+                <Shuffle className="w-3 h-3" strokeWidth={2.75} />
                 {language === 'he' ? 'רענן הצעות' : 'Shuffle Options'}
               </button>
             </div>
@@ -146,71 +146,69 @@ export const TopicInputModal: React.FC<TopicInputModalProps> = ({
                   type="button"
                   onClick={() => handleSelectPreset(preset.label)}
                   disabled={isLoading}
-                  className={`text-right p-2.5 rounded-xl border text-xs transition-all ${
+                  className={`text-right rtl:text-right ltr:text-left p-2.5 rounded-panel border text-xs transition-all ${
                     topic === preset.label
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900 ring-2 ring-indigo-100 font-bold'
-                      : 'bg-slate-50 border-slate-200 text-slate-800 hover:border-slate-300'
+                      ? 'bg-accent-100 border-accent-300 text-accent-900 font-bold'
+                      : 'bg-panel/40 border-ink/10 text-ink/80 hover:border-accent-300'
                   }`}
                 >
                   <div className="font-semibold">{preset.label}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5 truncate">{preset.desc}</div>
+                  <div className="text-[10px] text-ink/50 mt-0.5 truncate">{preset.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Depth Level Selector */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-2">
-              {language === 'he' ? 'רמת מורכבות והיקף העץ:' : 'Complexity and Scope:'}
+          <div className="field">
+            <label className="block text-xs font-semibold text-ink/70 mb-2">
+              {language === 'he' ? 'רמת מורכבות והיקף העץ:' : 'Depth'}
             </label>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="flex bg-panel border border-ink/10 rounded-full p-1">
               {[
-                { id: 'basic', label: language === 'he' ? 'ממוקד / בסיסי' : 'Basic', desc: language === 'he' ? '4-5 שלבים יסודיים' : '4-5 core steps' },
-                { id: 'comprehensive', label: language === 'he' ? 'מקיף (מומלץ)' : 'Comprehensive', desc: language === 'he' ? '6-8 שלבים מפורטים' : '6-8 detailed steps' },
-                { id: 'mastery', label: language === 'he' ? 'שליטה מוחלטת' : 'Mastery', desc: language === 'he' ? '8+ שלבים מעמיקים' : '8+ deep steps' },
+                { id: 'basic', label: language === 'he' ? 'בסיסי' : 'Basic', desc: language === 'he' ? '4-5 שלבים' : '4-5 steps' },
+                { id: 'comprehensive', label: language === 'he' ? 'מקיף' : 'Comprehensive', desc: language === 'he' ? '6-8 שלבים' : '6-8 steps' },
+                { id: 'mastery', label: language === 'he' ? 'שליטה מוחלטת' : 'Mastery', desc: language === 'he' ? '8+ שלבים' : '8+ steps' },
               ].map((lvl) => (
                 <button
                   key={lvl.id}
                   type="button"
                   onClick={() => setDepthLevel(lvl.id as any)}
                   disabled={isLoading}
-                  className={`p-2.5 rounded-xl border text-center transition-all ${
-                    depthLevel === lvl.id
-                      ? 'bg-indigo-50 border-indigo-300 text-indigo-900 font-bold ring-2 ring-indigo-100'
-                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                  className={`flex-1 py-2 rounded-full text-center transition-colors font-heading ${
+                    depthLevel === lvl.id ? 'bg-accent text-paper' : 'text-ink/60 hover:text-ink'
                   }`}
                 >
-                  <div className="text-xs font-medium">{lvl.label}</div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">{lvl.desc}</div>
+                  <div className="text-xs">{lvl.label}</div>
+                  <div className={`text-[10px] mt-0.5 font-body ${depthLevel === lvl.id ? 'text-paper/75' : 'text-ink/40'}`}>{lvl.desc}</div>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Custom instructions */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-              {language === 'he' ? 'הנחיות מיוחדות (אופציונלי):' : 'Custom Instructions (Optional):'}
+          <div className="field">
+            <label className="block text-xs font-semibold text-ink/70 mb-1.5">
+              {language === 'he' ? 'הנחיות מיוחדות (אופציונלי):' : 'Custom instructions (optional)'}
             </label>
             <textarea
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
-              placeholder={language === 'he' ? "למשל: התמקד בקורסים חינמיים בעברית ובאנגלית, ערוצי יוטיוב אקדמיים וספרים מומלצים למתחילים..." : "e.g. Focus on free courses, academic YouTube channels, and books for beginners..."}
+              placeholder={language === 'he' ? "למשל: התמקד בקורסים חינמיים בעברית ובאנגלית, ערוצי יוטיוב אקדמיים וספרים מומלצים למתחילים..." : "Focus areas, prior knowledge to assume, tone..."}
               rows={2}
               disabled={isLoading}
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-900 placeholder-slate-400 focus:outline-none focus:border-indigo-500"
+              className="w-full bg-panel/40 border border-ink/15 rounded-panel p-3 text-xs text-ink placeholder-ink/40 focus:outline-none focus:border-accent"
               dir="auto"
             />
           </div>
 
           {/* Footer actions / Loading State */}
-          <div className="pt-2 flex items-center justify-end gap-3 border-t border-slate-100">
+          <div className="pt-2 flex items-center justify-end gap-3 border-t border-ink/10">
             {!isLoading && (
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                className="px-4 py-2.5 rounded-full text-xs font-semibold text-ink/60 hover:text-ink hover:bg-panel transition-colors"
               >
                 {language === 'he' ? 'ביטול' : 'Cancel'}
               </button>
@@ -219,21 +217,21 @@ export const TopicInputModal: React.FC<TopicInputModalProps> = ({
             <button
               type="submit"
               disabled={!topic.trim() || isLoading}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs transition-all ${
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-heading text-xs transition-all ${
                 !topic.trim() || isLoading
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-md active:scale-95'
+                  ? 'bg-panel text-ink/35 cursor-not-allowed'
+                  : 'bg-accent hover:bg-accent-700 text-paper active:scale-95'
               }`}
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <Loader2 className="w-4 h-4 animate-spin" />
                   <span>{language === 'he' ? 'AI מחפש ובונה עץ ידע...' : 'AI is building the knowledge tree...'}</span>
                 </>
               ) : (
                 <>
-                  <Sparkles className="w-4 h-4 fill-white" />
-                  <span>{language === 'he' ? 'צור עץ למידה' : 'Create Tree'}</span>
+                  <Sparkles className="w-4 h-4" strokeWidth={2.75} />
+                  <span>{language === 'he' ? 'צור עץ למידה' : 'Generate tree'}</span>
                 </>
               )}
             </button>
