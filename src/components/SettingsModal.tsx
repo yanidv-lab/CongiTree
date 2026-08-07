@@ -82,7 +82,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, o
     await clearStoredApiKey(provider);
     setApiKey('');
     setStatusMessage({ type: 'info', text: t('מפתח ה-API נמחק בהצלחה מהמכשיר.', 'API key removed from this device.') });
-    if (onKeySaved) onKeySaved();
+    // Deliberately not calling onKeySaved here: the caller uses it to resume the request that was
+    // waiting on a key, and resuming with the key just deleted would immediately fail and reopen
+    // this dialog.
   };
 
   if (!isOpen) return null;

@@ -461,16 +461,24 @@ export const NodeDetailDrawer: React.FC<NodeDetailDrawerProps> = ({
         <div className="px-6 py-4 border-t border-ink/10 flex items-center gap-2">
           <button
             onClick={() => onExpandNode(node)}
-            disabled={isLoadingExpand || node.expansionExhausted}
-            className="flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-full bg-accent hover:bg-accent-700 text-paper font-heading text-xs transition-all active:scale-95 disabled:opacity-50"
-            title={node.expansionExhausted ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand') : undefined}
+            disabled={isLoadingExpand}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-full font-heading text-xs transition-all active:scale-95 disabled:opacity-50 ${
+              node.expansionExhausted
+                ? 'border border-ink/20 text-ink/60 hover:bg-panel'
+                : 'bg-accent hover:bg-accent-700 text-paper'
+            }`}
+            // Still clickable when "exhausted" - see VisualTreeGraph: that flag is persisted, so
+            // disabling it outright made nodes permanently unexpandable after a single failure.
+            title={node.expansionExhausted
+              ? (language === 'he' ? 'לא נמצאו תתי-נושאים חדשים בניסיון הקודם - לחץ לניסיון נוסף' : 'No new sub-topics were found last time - click to try again')
+              : undefined}
           >
             <GitBranchPlus className="w-3.5 h-3.5" strokeWidth={2.75} />
             <span>
               {isLoadingExpand
                 ? (language === 'he' ? 'מרחיב...' : 'Expanding...')
                 : node.expansionExhausted
-                ? (language === 'he' ? 'סוף נושא' : 'End of Topic')
+                ? (language === 'he' ? 'נסה שוב' : 'Try again')
                 : (language === 'he' ? 'גדל ענף' : 'Grow branch')}
             </span>
           </button>

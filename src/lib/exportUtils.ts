@@ -2,16 +2,18 @@ import { toPng } from 'html-to-image';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { LearningTree, TreeNode, Resource } from '../types';
-import { isNativeExportTarget, saveBinaryFileNative, saveTextFileNative } from './fileSave';
+import { saveDataUrlFile, saveTextFile, saveFile, SaveOutcome } from './fileSave';
+
+export type { SaveOutcome };
 
 export async function exportTreeToImage(
   elementId: string,
   fileName: string = 'learning_map'
-): Promise<boolean> {
+): Promise<SaveOutcome> {
   const node = document.getElementById(elementId);
   if (!node) {
     console.error('Target node for export not found:', elementId);
-    return false;
+    return 'failed';
   }
 
   try {
@@ -28,40 +30,22 @@ export async function exportTreeToImage(
     });
 
     const pngFileName = `${fileName.replace(/\s+/g, '_')}_learning_tree.png`;
-
-    if (isNativeExportTarget()) {
-      const base64Data = dataUrl.split(',')[1] || '';
-      return await saveBinaryFileNative(base64Data, pngFileName);
-    }
-
-    const link = document.createElement('a');
-    link.download = pngFileName;
-    link.href = dataUrl;
-    link.click();
-    return true;
+    return await saveDataUrlFile(dataUrl, pngFileName, 'image/png');
   } catch (err) {
     console.error('Failed to export tree to image:', err);
-    return false;
+    return 'failed';
   }
 }
 
-export async function exportTreeToJson(tree: any, fileName: string = 'learning_tree'): Promise<boolean> {
-  const jsonStr = JSON.stringify(tree, null, 2);
-  const jsonFileName = `${fileName.replace(/\s+/g, '_')}.json`;
-
-  if (isNativeExportTarget()) {
-    return await saveTextFileNative(jsonStr, jsonFileName);
+export async function exportTreeToJson(tree: any, fileName: string = 'learning_tree'): Promise<SaveOutcome> {
+  try {
+    const jsonStr = JSON.stringify(tree, null, 2);
+    const jsonFileName = `${fileName.replace(/\s+/g, '_')}.json`;
+    return await saveTextFile(jsonStr, jsonFileName, 'application/json');
+  } catch (err) {
+    console.error('Failed to export tree to JSON:', err);
+    return 'failed';
   }
-
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  const link = document.createElement('a');
-  link.download = jsonFileName;
-  link.href = url;
-  link.click();
-  URL.revokeObjectURL(url);
-  return true;
 }
 
 function escapeSvgText(text: string): string {
@@ -260,7 +244,7 @@ function generateVisualTreeSvg(tree: LearningTree, isHe: boolean): string {
 export async function exportTreeToPdf(
   tree: LearningTree,
   language: 'he' | 'en' = 'he'
-): Promise<boolean> {
+): Promise<SaveOutcome> {
   const isHe = language === 'he';
   const nodesList: TreeNode[] = Object.values(tree.nodes || {});
   
@@ -651,7 +635,7 @@ export async function exportTreeToPdf(
   const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
   if (!iframeDoc) {
     document.body.removeChild(iframe);
-    return false;
+    return 'failed';
   }
 
   iframeDoc.open();
@@ -686,12 +670,26 @@ export async function exportTreeToPdf(
   await new Promise((resolve) => setTimeout(resolve, 200));
 
   try {
-    const canvas = await html2canvas(iframeDoc.body, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff',
-    });
+    // Rasterising the whole document at 2x is fine on a desktop but is the single heaviest step
+    // here, and on a phone a tall tree can push it into multi-minute territory or an out-of-memory
+    // kill - which is what "it says it's exporting and then nothing ever happens" looks like.
+    // Scale down for very long documents so total pixel count stays bounded.
+    const documentHeightPx = iframeDoc.body.scrollHeight || 1400;
+    const renderScale = documentHeightPx > 12000 ? 1 : documentHeightPx > 6000 ? 1.5 : 2;
+
+    // And never let this step hang indefinitely: html2canvas waits on cloned-document/image loads
+    // that can silently never resolve in a WebView. Failing loudly beats a permanent spinner.
+    const canvas = await Promise.race([
+      html2canvas(iframeDoc.body, {
+        scale: renderScale,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('PDF_RENDER_TIMEOUT')), 90000)
+      ),
+    ]);
 
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -793,25 +791,20 @@ export async function exportTreeToPdf(
     const safeFileName = tree.topic.replace(/[^\w\u0590-\u05FF]/g, '_');
     const pdfFileName = `${safeFileName}_learning_map.pdf`;
 
-    let saved = true;
-    if (isNativeExportTarget()) {
-      // jsPDF's own .save() falls back to the same <a download> trick that no-ops inside an
-      // Android WebView, so on native platforms hand the raw PDF bytes to the Filesystem+Share
-      // path instead of calling .save() at all.
-      const base64Data = pdf.output('datauristring').split(',')[1] || '';
-      saved = await saveBinaryFileNative(base64Data, pdfFileName);
-    } else {
-      pdf.save(pdfFileName);
-    }
+    // Deliberately not jsPDF's own .save(): it uses the same bare <a download> trick that gets
+    // silently swallowed inside an Android WebView, and it never tells us whether anything was
+    // actually written. Hand the bytes to saveFile() instead, which picks a real destination
+    // (share sheet / save dialog / download) per platform and reports what happened.
+    const outcome = await saveFile(pdf.output('blob'), pdfFileName, 'application/pdf');
 
     document.body.removeChild(iframe);
-    return saved;
+    return outcome;
   } catch (err) {
     console.error('Failed to export tree to PDF:', err);
     if (document.body.contains(iframe)) {
       document.body.removeChild(iframe);
     }
-    return false;
+    return 'failed';
   }
 }
 

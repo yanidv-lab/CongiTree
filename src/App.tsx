@@ -13,7 +13,7 @@ import {
   areTitlesDuplicateOrSimilar,
   MAX_NODE_EXPANSION_DEPTH
 } from './lib/treeStore';
-import { exportTreeToImage, exportTreeToJson, exportTreeToPdf } from './lib/exportUtils';
+import { exportTreeToImage, exportTreeToJson, exportTreeToPdf, SaveOutcome } from './lib/exportUtils';
 import { generateLearningTreeClient, expandTreeNodeClient } from './lib/llmClient';
 import { LearningTree, TreeNode, Resource } from './types';
 import { Header } from './components/Header';
@@ -63,6 +63,68 @@ function fallbackReasonMessage(reason: string, language: 'he' | 'en'): string {
   }
 }
 
+// Raised when our own backend is reachable but rejected the request (rate limit, bad input,
+// server-side AI failure). Distinct from "no backend at all", which is the normal case for the
+// packaged Android build and is what the on-device API-key path exists to handle.
+class ServerApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ServerApiError';
+    this.status = status;
+  }
+}
+
+/**
+ * POST to our backend. Resolves with the parsed payload on success.
+ * Throws ServerApiError when the backend answered with an error (must be shown to the user),
+ * or a plain BACKEND_UNREACHABLE Error when there is no backend to talk to (fall back on-device).
+ */
+async function callBackend(endpoint: string, payload: unknown): Promise<any> {
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new Error('BACKEND_UNREACHABLE');
+  }
+
+  // A static host with no API behind it (Capacitor's local server, a plain CDN deploy) answers
+  // these routes with the SPA's index.html or a generic 404 page. That's "no backend", not a
+  // backend error, so it should fall through to the on-device path rather than surface as one.
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('BACKEND_UNREACHABLE');
+  }
+
+  let data: any;
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error('BACKEND_UNREACHABLE');
+  }
+
+  if (!response.ok || !data?.success) {
+    throw new ServerApiError(data?.error || `HTTP ${response.status}`, response.status);
+  }
+  return data;
+}
+
+// The server's own rate limiter answers with 429 and a Hebrew-only message; translate it here so
+// the user always learns *why* the request was refused rather than being told to enter an API key.
+function serverErrorMessage(err: ServerApiError, language: 'he' | 'en'): string {
+  const isHe = language === 'he';
+  if (err.status === 429) {
+    return isHe
+      ? 'הגעת למגבלת השימוש של השרת (יותר מדי בקשות). המתן מספר דקות ונסה שוב, או הזן מפתח API אישי בהגדרות כדי לעקוף את המגבלה.'
+      : "You've hit the server's usage limit (too many requests). Wait a few minutes and try again, or enter your own API key in Settings to bypass the limit.";
+  }
+  return err.message;
+}
+
 export default function App() {
   const [savedTrees, setSavedTrees] = useState<LearningTree[]>([]);
   const [activeTreeId, setActiveTreeId] = useState<string | null>(null);
@@ -74,6 +136,15 @@ export default function App() {
   const [isNewModalOpen, setIsNewModalOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [isExportingPdf, setIsExportingPdf] = useState<boolean>(false);
+
+  // What the user was trying to do when we discovered no API key was stored. Kept so saving a key
+  // resumes that exact request instead of making them re-enter everything from scratch.
+  const [pendingGenerate, setPendingGenerate] = useState<{
+    topic: string;
+    depthLevel: 'basic' | 'comprehensive' | 'mastery';
+    customInstructions: string;
+  } | null>(null);
+  const [pendingExpandNodeId, setPendingExpandNodeId] = useState<string | null>(null);
 
   // Staging & Custom Branch Modals State
   const [stagingBranchApproval, setStagingBranchApproval] = useState<{
@@ -276,28 +347,15 @@ export default function App() {
       let fallbackReason: string | undefined;
 
       try {
-        const response = await fetch('/api/generate-tree', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            topic,
-            language,
-            depthLevel,
-            customInstructions,
-          }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success || !data.tree) {
-          throw new Error(data.error || (language === 'he' ? 'נכשלה יצירת עץ הלמידה' : 'Failed to generate learning tree'));
-        }
-
+        const data = await callBackend('/api/generate-tree', { topic, language, depthLevel, customInstructions });
         rawTree = updateTreeCompletionStatus(data.tree);
         if (data.isFallback) fallbackReason = data.fallbackReason;
       } catch (serverErr) {
-        // No reachable backend (e.g. a standalone Android build with no bundled server) -
-        // fall back to calling Gemini directly from the device with the user's stored key.
+        // A backend that answered with an error (rate limit, bad request) must surface as that
+        // error - retrying on-device would hide it behind a misleading "enter an API key" prompt.
+        if (serverErr instanceof ServerApiError) throw serverErr;
+        // Genuinely no backend (standalone Android build) - call the model directly from the
+        // device using the user's own stored key.
         const clientResult = await generateLearningTreeClient({ topic, language, depthLevel, customInstructions });
         rawTree = updateTreeCompletionStatus(clientResult.tree);
         if (clientResult.isFallback) fallbackReason = clientResult.fallbackReason;
@@ -325,13 +383,18 @@ export default function App() {
     } catch (err: any) {
       console.error('Error generating tree:', err);
       if (err?.message === 'API_KEY_MISSING') {
-        setIsNewModalOpen(false);
+        // Deliberately leave the topic modal open (and its typed topic/depth/instructions intact)
+        // so the user doesn't lose what they entered just because a key was needed - the key
+        // dialog stacks on top, and saving a key re-runs this exact request automatically.
+        setPendingGenerate({ topic, depthLevel, customInstructions });
         setIsSettingsOpen(true);
         showToast(
           language === 'he'
-            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח API כדי להמשיך'
-            : 'App is running in standalone mode - please enter an API key to continue'
+            ? 'האפליקציה פועלת במצב עצמאי - הזן מפתח API וניצור את העץ שביקשת אוטומטית'
+            : "App is running in standalone mode - enter an API key and we'll build the tree you asked for automatically"
         );
+      } else if (err instanceof ServerApiError) {
+        setErrorMessage(serverErrorMessage(err, language));
       } else {
         setErrorMessage(err.message || (language === 'he' ? 'שגיאה בחיבור לשרת יצירת עץ הלמידה' : 'Error connecting to the tree-generation server'));
       }
@@ -355,18 +418,36 @@ export default function App() {
     });
   };
 
+  const clearExpansionExhausted = (nodeId: string) => {
+    updateCurrentTree(tree => {
+      const node = tree.nodes[nodeId];
+      if (!node || !node.expansionExhausted) return tree;
+      return {
+        ...tree,
+        nodes: {
+          ...tree.nodes,
+          [nodeId]: { ...node, expansionExhausted: false },
+        },
+      };
+    });
+  };
+
   // Expand Node API Call
   const handleExpandNode = async (node: TreeNode) => {
     if (!currentTree) return;
 
-    // A prior attempt already confirmed there's nothing distinct left to add - no need to ask again.
+    // A previous attempt concluded there was nothing distinct left here. That verdict is NOT
+    // permanent: it may have come from a transient API failure, an over-eager model, or an older
+    // build with stricter dedup - and because the flag is persisted to localStorage, treating it
+    // as final left nodes in existing trees impossible to ever expand again. So retry instead,
+    // clearing the flag first; if the topic really is exhausted, this attempt re-sets it.
     if (node.expansionExhausted) {
+      clearExpansionExhausted(node.id);
       showToast(
         language === 'he'
-          ? `סוף נושא! לא נמצאו תתי-נושאים חדשים וייחודיים לענף "${node.title}".`
-          : `End of topic! No new, distinct sub-topics were found for "${node.title}".`
+          ? `מנסה שוב למצוא תתי-נושאים חדשים לענף "${node.title}"...`
+          : `Retrying the search for new sub-topics under "${node.title}"...`
       );
-      return;
     }
 
     // Hard safety ceiling only - not meant to trigger in normal use. Real stopping happens
@@ -402,20 +483,13 @@ export default function App() {
 
       let data: any;
       try {
-        const response = await fetch('/api/expand-node', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(expandPayload),
-        });
-
-        data = await response.json();
-
-        if (!response.ok || !data.success) {
-          throw new Error(data.error || (language === 'he' ? 'נכשלה הרחבת הענף' : 'Failed to expand branch'));
-        }
+        data = await callBackend('/api/expand-node', expandPayload);
       } catch (serverErr) {
-        // No reachable backend (e.g. a standalone Android build with no bundled server) -
-        // fall back to calling Gemini directly from the device with the user's stored key.
+        // A backend that answered with an error (rate limit, bad request) must surface as that
+        // error - retrying on-device would hide it behind a misleading "enter an API key" prompt.
+        if (serverErr instanceof ServerApiError) throw serverErr;
+        // Genuinely no backend (standalone Android build) - call the model directly from the
+        // device using the user's own stored key.
         data = await expandTreeNodeClient(expandPayload);
       }
 
@@ -471,18 +545,41 @@ export default function App() {
     } catch (err: any) {
       console.error('Error expanding node:', err);
       if (err?.message === 'API_KEY_MISSING') {
+        // Remember which node we were expanding so saving a key resumes it automatically.
+        setPendingExpandNodeId(node.id);
         setIsSettingsOpen(true);
         showToast(
           language === 'he'
-            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח API כדי להמשיך'
-            : 'App is running in standalone mode - please enter an API key to continue'
+            ? 'האפליקציה פועלת במצב עצמאי - הזן מפתח API ונמשיך להרחיב את הענף אוטומטית'
+            : "App is running in standalone mode - enter an API key and we'll continue expanding this branch automatically"
         );
+      } else if (err instanceof ServerApiError) {
+        showToast(serverErrorMessage(err, language));
       } else {
         showToast((language === 'he' ? 'שגיאה בהרחבת הענף: ' : 'Error expanding branch: ') + (err?.message || String(err)));
       }
     } finally {
       setIsExpanding(false);
       setExpandingNodeId(null);
+    }
+  };
+
+  // A key was just stored. Close Settings and pick the interrupted request back up where it left
+  // off, so needing a key never costs the user the topic they typed or the branch they clicked.
+  const handleApiKeySaved = () => {
+    setIsSettingsOpen(false);
+
+    if (pendingGenerate) {
+      const { topic, depthLevel, customInstructions } = pendingGenerate;
+      setPendingGenerate(null);
+      handleGenerateTree(topic, depthLevel, customInstructions);
+      return;
+    }
+
+    if (pendingExpandNodeId) {
+      const nodeToExpand = currentTree?.nodes[pendingExpandNodeId];
+      setPendingExpandNodeId(null);
+      if (nodeToExpand) handleExpandNode(nodeToExpand);
     }
   };
 
@@ -682,15 +779,27 @@ export default function App() {
     );
   };
 
+  // Turns a save outcome into the right message - notably, a user who dismissed the save/share
+  // dialog shouldn't be told the export "failed", and a successful save shouldn't claim the file
+  // "downloaded" when on Android it was handed to the share sheet for the user to place.
+  const saveOutcomeToast = (outcome: SaveOutcome, kind: 'pdf' | 'image' | 'json') => {
+    const isHe = language === 'he';
+    if (outcome === 'cancelled') {
+      return isHe ? 'השמירה בוטלה.' : 'Save cancelled.';
+    }
+    if (outcome === 'failed') {
+      return isHe ? 'שמירת הקובץ נכשלה. נסה שוב.' : 'Saving the file failed. Please try again.';
+    }
+    if (kind === 'pdf') return isHe ? 'קובץ ה-PDF נשמר בהצלחה!' : 'PDF saved successfully!';
+    if (kind === 'image') return isHe ? 'התמונה נשמרה בהצלחה!' : 'Image saved successfully!';
+    return isHe ? 'הקובץ נשמר בהצלחה!' : 'File saved successfully!';
+  };
+
   // Export Image
   const handleExportImage = async () => {
     showToast(language === 'he' ? 'מייצא את מפת הלמידה כתמונה...' : 'Exporting the learning map as an image...');
-    const success = await exportTreeToImage('tree_export_stage', currentTree?.topic || 'learning_map');
-    if (success) {
-      showToast(language === 'he' ? 'התמונה יורדה בהצלחה!' : 'Image downloaded successfully!');
-    } else {
-      showToast(language === 'he' ? 'הייצוא נכשל. נסה שוב' : 'Export failed. Please try again.');
-    }
+    const outcome = await exportTreeToImage('tree_export_stage', currentTree?.topic || 'learning_map');
+    showToast(saveOutcomeToast(outcome, 'image'));
   };
 
   // Export PDF with Side Topics Breakdown & Clickable Hyperlinks
@@ -704,12 +813,8 @@ export default function App() {
     setIsExportingPdf(true);
     showToast(language === 'he' ? 'מייצר מסמך PDF עם פירוט נושאים וקישורים... זה עשוי לקחת מספר שניות' : 'Generating PDF with topics & hyperlinks... this can take a few seconds');
     try {
-      const success = await exportTreeToPdf(tree, language);
-      if (success) {
-        showToast(language === 'he' ? 'קובץ ה-PDF יורד בהצלחה!' : 'PDF downloaded successfully!');
-      } else {
-        showToast(language === 'he' ? 'הייצוא נכשל. נסה שוב' : 'Export failed. Please try again.');
-      }
+      const outcome = await exportTreeToPdf(tree, language);
+      showToast(saveOutcomeToast(outcome, 'pdf'));
     } finally {
       setIsExportingPdf(false);
     }
@@ -784,7 +889,11 @@ export default function App() {
         onToggleSidebar={() => setIsSidebarOpen(true)}
         onExportImage={handleExportImage}
         onExportPdf={() => handleExportPdf()}
-        onExportJson={() => currentTree && exportTreeToJson(currentTree, currentTree.topic)}
+        onExportJson={async () => {
+          if (!currentTree) return;
+          const outcome = await exportTreeToJson(currentTree, currentTree.topic);
+          showToast(saveOutcomeToast(outcome, 'json'));
+        }}
         language={language}
         setLanguage={setLanguage}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -972,10 +1081,11 @@ export default function App() {
         />
       )}
 
-      {/* Gemini API Key Settings Modal (standalone/Android fallback mode) */}
+      {/* API Key Settings Modal (standalone/Android fallback mode) */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onKeySaved={handleApiKeySaved}
         language={language}
       />
     </div>
