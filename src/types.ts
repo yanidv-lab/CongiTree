@@ -63,6 +63,8 @@ export interface ExpandNodeRequest {
   nodeId: string;
   nodeTitle: string;
   nodeDescription: string;
+  nodeDepth?: number;
+  ancestors?: string[];
   existingTreeContext?: string;
   language?: string;
 }

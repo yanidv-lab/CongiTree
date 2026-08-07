@@ -14,6 +14,7 @@ import {
   MAX_NODE_EXPANSION_DEPTH
 } from './lib/treeStore';
 import { exportTreeToImage, exportTreeToJson, exportTreeToPdf } from './lib/exportUtils';
+import { generateLearningTreeClient, expandTreeNodeClient } from './lib/geminiClient';
 import { LearningTree, TreeNode, Resource } from './types';
 import { Header } from './components/Header';
 import { VisualTreeGraph } from './components/VisualTreeGraph';
@@ -25,6 +26,7 @@ import { DashboardView } from './components/DashboardView';
 import { TopicInputModal } from './components/TopicInputModal';
 import { BranchApprovalModal } from './components/BranchApprovalModal';
 import { CustomBranchModal } from './components/CustomBranchModal';
+import { SettingsModal } from './components/SettingsModal';
 import { 
   Sparkles, 
   GitFork, 
@@ -45,6 +47,7 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<TreeNode | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
   const [isNewModalOpen, setIsNewModalOpen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   // Staging & Custom Branch Modals State
   const [stagingBranchApproval, setStagingBranchApproval] = useState<{
@@ -243,24 +246,34 @@ export default function App() {
     setErrorMessage(null);
 
     try {
-      const response = await fetch('/api/generate-tree', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          topic,
-          language,
-          depthLevel,
-          customInstructions,
-        }),
-      });
+      let rawTree: LearningTree;
 
-      const data = await response.json();
+      try {
+        const response = await fetch('/api/generate-tree', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            topic,
+            language,
+            depthLevel,
+            customInstructions,
+          }),
+        });
 
-      if (!response.ok || !data.success || !data.tree) {
-        throw new Error(data.error || 'נכשלה יצירת עץ הלמידה');
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.tree) {
+          throw new Error(data.error || 'נכשלה יצירת עץ הלמידה');
+        }
+
+        rawTree = updateTreeCompletionStatus(data.tree);
+      } catch (serverErr) {
+        // No reachable backend (e.g. a standalone Android build with no bundled server) -
+        // fall back to calling Gemini directly from the device with the user's stored key.
+        const clientResult = await generateLearningTreeClient({ topic, language, depthLevel, customInstructions });
+        rawTree = updateTreeCompletionStatus(clientResult.tree);
       }
 
-      const rawTree: LearningTree = updateTreeCompletionStatus(data.tree);
       const subNodesList = Object.values(rawTree.nodes).filter(n => n.id !== rawTree.rootNodeId);
 
       setIsNewModalOpen(false);
@@ -275,7 +288,17 @@ export default function App() {
 
     } catch (err: any) {
       console.error('Error generating tree:', err);
-      setErrorMessage(err.message || 'שגיאה בחיבור לשרת יצירת עץ הלמידה');
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        setIsNewModalOpen(false);
+        setIsSettingsOpen(true);
+        showToast(
+          language === 'he'
+            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח Gemini API כדי להמשיך'
+            : 'App is running in standalone mode - please enter a Gemini API key to continue'
+        );
+      } else {
+        setErrorMessage(err.message || 'שגיאה בחיבור לשרת יצירת עץ הלמידה');
+      }
     } finally {
       setIsGenerating(false);
     }
@@ -330,26 +353,34 @@ export default function App() {
       // Build context string of current node titles and ancestor titles
       const contextTitles = (Object.values(currentTree.nodes) as TreeNode[]).map(n => n.title).join(', ');
       const ancestorTitles = getNodeAncestors(currentTree, node.id).map(a => a.title);
+      const expandPayload = {
+        treeTopic: currentTree.topic,
+        nodeId: node.id,
+        nodeTitle: node.title,
+        nodeDescription: node.description,
+        nodeDepth,
+        ancestors: ancestorTitles,
+        existingTreeContext: contextTitles,
+        language,
+      };
 
-      const response = await fetch('/api/expand-node', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          treeTopic: currentTree.topic,
-          nodeId: node.id,
-          nodeTitle: node.title,
-          nodeDescription: node.description,
-          nodeDepth,
-          ancestors: ancestorTitles,
-          existingTreeContext: contextTitles,
-          language,
-        }),
-      });
+      let data: any;
+      try {
+        const response = await fetch('/api/expand-node', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(expandPayload),
+        });
 
-      const data = await response.json();
+        data = await response.json();
 
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || 'נכשלה הרחבת הענף');
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'נכשלה הרחבת הענף');
+        }
+      } catch (serverErr) {
+        // No reachable backend (e.g. a standalone Android build with no bundled server) -
+        // fall back to calling Gemini directly from the device with the user's stored key.
+        data = await expandTreeNodeClient(expandPayload);
       }
 
       if (data.isEndOfTopic || !data.subNodes || data.subNodes.length === 0) {
@@ -389,7 +420,16 @@ export default function App() {
 
     } catch (err: any) {
       console.error('Error expanding node:', err);
-      showToast('שגיאה בהרחבת הענף: ' + err.message);
+      if (err?.message === 'GEMINI_API_KEY_MISSING') {
+        setIsSettingsOpen(true);
+        showToast(
+          language === 'he'
+            ? 'האפליקציה פועלת במצב עצמאי - יש להזין מפתח Gemini API כדי להמשיך'
+            : 'App is running in standalone mode - please enter a Gemini API key to continue'
+        );
+      } else {
+        showToast((language === 'he' ? 'שגיאה בהרחבת הענף: ' : 'Error expanding branch: ') + err.message);
+      }
     } finally {
       setIsExpanding(false);
       setExpandingNodeId(null);
@@ -663,6 +703,7 @@ export default function App() {
         onExportJson={() => currentTree && exportTreeToJson(currentTree, currentTree.topic)}
         language={language}
         setLanguage={setLanguage}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -845,6 +886,13 @@ export default function App() {
           language={language}
         />
       )}
+
+      {/* Gemini API Key Settings Modal (standalone/Android fallback mode) */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        language={language}
+      />
     </div>
   );
 }
