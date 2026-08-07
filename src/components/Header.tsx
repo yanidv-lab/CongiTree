@@ -9,6 +9,7 @@ import {
   Network,
   ListTree,
   Library,
+  KeyRound,
 } from 'lucide-react';
 import { calculateTreeProgress } from '../lib/treeStore';
 import { LearningTree } from '../types';
@@ -25,6 +26,7 @@ interface HeaderProps {
   onExportJson: () => void;
   language: 'he' | 'en';
   setLanguage: (lang: 'he' | 'en') => void;
+  onOpenSettings?: () => void;
 }
 
 const VIEW_TABS: { id: 'dashboard' | 'graph' | 'vault' | 'list'; icon: React.ElementType; labelHe: string; labelEn: string }[] = [
@@ -45,6 +47,7 @@ export const Header: React.FC<HeaderProps> = ({
   onExportPdf,
   language,
   setLanguage,
+  onOpenSettings,
 }) => {
   const progress = currentTree ? calculateTreeProgress(currentTree) : null;
 
@@ -85,6 +88,16 @@ export const Header: React.FC<HeaderProps> = ({
                 EN
               </button>
             </div>
+
+            {onOpenSettings && (
+              <button
+                onClick={onOpenSettings}
+                className="p-2 rounded-full border border-ink/15 text-ink/70 hover:text-ink hover:bg-panel transition-colors"
+                title={language === 'he' ? 'הגדרות מפתח API' : 'API Key Settings'}
+              >
+                <KeyRound className="w-4 h-4" strokeWidth={2.75} />
+              </button>
+            )}
 
             <button
               onClick={onToggleSidebar}
