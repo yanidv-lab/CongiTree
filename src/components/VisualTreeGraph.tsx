@@ -683,15 +683,20 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                       e.stopPropagation();
                       onExpandNode(node);
                     }}
-                    disabled={isExpanding || node.expansionExhausted}
+                    disabled={isExpanding}
                     className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:hover:scale-100 ${
-                      node.childrenIds.length === 0
+                      node.expansionExhausted
+                        ? 'border border-ink/20 text-ink/55 hover:bg-panel'
+                        : node.childrenIds.length === 0
                         ? 'border border-dashed border-accent-400 text-accent-700 hover:bg-accent-100'
                         : 'bg-accent-100 hover:bg-accent-200 text-accent-800'
                     }`}
+                    // Deliberately still clickable when "exhausted": that verdict is persisted to
+                    // localStorage, so leaving it disabled permanently froze nodes whose only
+                    // failed attempt was a transient API error or an older, stricter build.
                     title={
                       node.expansionExhausted
-                        ? (language === 'he' ? 'לא נמצאו עוד תתי-נושאים ייחודיים להרחבה' : 'No more distinct sub-topics to expand')
+                        ? (language === 'he' ? 'לא נמצאו תתי-נושאים חדשים בניסיון הקודם - לחץ לניסיון נוסף' : 'No new sub-topics were found last time - click to try again')
                         : (language === 'he' ? "הרחב נושא זה בענפים נוספים עם AI" : "Expand this topic with AI")
                     }
                   >
@@ -700,7 +705,7 @@ export const VisualTreeGraph: React.FC<VisualTreeGraphProps> = ({
                       {isExpanding && expandingNodeId === node.id
                         ? (language === 'he' ? 'מרחיב...' : 'Expanding...')
                         : node.expansionExhausted
-                        ? (language === 'he' ? 'סוף נושא' : 'End of Topic')
+                        ? (language === 'he' ? 'נסה שוב' : 'Try again')
                         : node.childrenIds.length === 0
                         ? (language === 'he' ? '+ גדל ענף' : '+ Grow branch')
                         : (language === 'he' ? '+ הרחב ענף' : '+ Expand')}

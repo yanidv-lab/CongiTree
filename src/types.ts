@@ -65,6 +65,9 @@ export interface ExpandNodeRequest {
   nodeDescription: string;
   nodeDepth?: number;
   ancestors?: string[];
+  /** Titles already in the tree. Preferred over existingTreeContext - see normalizeExistingTitles. */
+  existingTitles?: string[];
+  /** Legacy comma-joined form of existingTitles, kept so older clients keep working. */
   existingTreeContext?: string;
   language?: string;
 }
