@@ -1,5 +1,6 @@
 import { MAX_NODE_EXPANSION_DEPTH } from "./constants";
 import { LearningTree } from "../types";
+import { FailureKind, classifyFailure } from "./llmResilience";
 
 // Shared, provider-agnostic pieces of the client-side ("standalone app") Gemini/OpenAI/Anthropic
 // callers: JSON extraction, resource-URL sanitization, dedup, fallback tree/subnode builders, and
@@ -8,19 +9,32 @@ import { LearningTree } from "../types";
 // about *what* we ask for and how we validate/repair the result lives here once, so all three
 // providers produce trees with the same structure and quality bar.
 
-export type FallbackReason = "rate_limit" | "auth_error" | "api_error" | "parse_error";
+// A "why did we not get real AI content" code, shared by the server responses and the on-device
+// clients. This is deliberately the same union as llmResilience's FailureKind: the classification
+// logic lives there (it has to tell a one-minute burst limit apart from a dead quota), and this
+// re-export keeps the old import sites working.
+export type FallbackReason = FailureKind;
 
 export function classifyProviderError(err: any): FallbackReason {
-  const status = err?.status ?? err?.statusCode;
-  const message: string = err?.message || "";
-  const isRateLimit = status === 429 || message.includes("429") || message.includes("RESOURCE_EXHAUSTED") || message.includes("rate_limit");
-  if (isRateLimit) return "rate_limit";
-  const isAuthError =
-    status === 401 || status === 403 ||
-    message.includes("API_KEY_INVALID") || message.includes("PERMISSION_DENIED") ||
-    message.includes("authentication_error") || message.includes("permission_error") || message.includes("invalid_api_key");
-  if (isAuthError) return "auth_error";
-  return "api_error";
+  return classifyFailure(err).kind;
+}
+
+// The list of titles already in the tree, used both for the anti-repetition prompt and for dedup.
+//
+// It used to travel as a single comma-joined string (`titles.join(', ')` on the client,
+// `split(',')` on the server), which silently shredded any title containing a comma into
+// fragments. Short fragments then matched far too eagerly in areTitlesSimilar, so legitimate new
+// sub-topics were rejected as duplicates and the branch got marked "end of topic". `existingTitles`
+// is now sent as a real array; the string form is still accepted so an older client (or a cached
+// Android build) keeps working.
+export function normalizeExistingTitles(existingTitles?: unknown, existingTreeContext?: unknown): string[] {
+  if (Array.isArray(existingTitles)) {
+    return existingTitles.map((t) => String(t ?? '').trim()).filter(Boolean);
+  }
+  if (typeof existingTreeContext === 'string' && existingTreeContext.trim()) {
+    return existingTreeContext.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
 }
 
 export function parseJsonFromModelText(text: string): any {
@@ -389,15 +403,15 @@ Node Description: "${nodeDescription}"
 Current Hierarchy Depth: Level ${nodeDepth} out of ${MAX_NODE_EXPANSION_DEPTH}.
 Ancestor Hierarchy Chain: ${ancestorChain.length > 0 ? ancestorChain.map((a) => `"${a}"`).join(' -> ') : 'Root Topic'}
 
-RULES:
-1. Existing nodes ALREADY in this learning tree (avoid recreating these):
+CRITICAL STRICT ANTI-REPETITION & ANTI-LOOP RULES:
+1. Existing nodes ALREADY in this learning tree:
 ${existingTitlesList.map((t) => `- "${t}"`).join('\n')}
-2. Only reject a candidate sub-topic if it would teach essentially the same concept as one of the existing titles above (a reworded duplicate). Being about the same general parent subject is EXPECTED and desirable - that IS what makes it a relevant sub-topic.
-3. Almost every topic - even a seemingly specific one - can still be broken down further: deeper mechanisms, specific techniques or tools, notable edge cases, real-world applications, common pitfalls, comparisons with alternatives, or historical/theoretical context not yet covered by the existing titles. Make a genuine, thorough effort to find such angles before concluding there is nothing left. Returning an empty array should be rare - reserve it for cases where "${nodeTitle}" is truly a single atomic fact or every reasonable angle is already covered above, not merely because a topic feels narrow.
+2. YOU ARE STRICTLY FORBIDDEN FROM GENERATING SUB-BRANCHES THAT ARE NEAR-DUPLICATES OF THE EXISTING TITLES LISTED ABOVE OR ANY ANCESTOR TOPICS - i.e. the same underlying concept, just reworded. Being about the same general parent subject is EXPECTED and FINE (that's what makes it a relevant sub-topic) - only reject a candidate if it would teach essentially the same thing as something already in the list.
+3. If "${nodeTitle}" is already atomic or specific, or cannot be broken down into distinct, brand-new sub-topics, YOU MUST RETURN AN EMPTY ARRAY [] for "expandedSubNodes".
 
 Language requested: ${isHe ? 'Hebrew (עברית)' : 'English'}.
 
-Generate 3 to 5 detailed, distinct SUB-BRANCH NODES with 2-4 verified resources each if any reasonable ones exist (see rule 3) - only return fewer, or an empty array, if you genuinely cannot find that many non-overlapping angles.
+If distinct, brand new sub-topics exist, generate 2 to 3 detailed SUB-BRANCH NODES with 2-4 verified resources each.
 
 Return ONLY a valid JSON object matching this structure:
 {

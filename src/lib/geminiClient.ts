@@ -1,119 +1,63 @@
 import { GoogleGenAI } from "@google/genai";
 import { getStoredApiKey } from "./apiKeyStore";
-import { MAX_NODE_EXPANSION_DEPTH } from "./constants";
 import { GenerateTreeRequest, ExpandNodeRequest, LearningTree } from "../types";
-import {
-  FallbackReason,
-  classifyProviderError,
-  parseJsonFromModelText,
-  buildFallbackTree,
-  depthGuidanceFor,
-  buildGenerateTreePrompt,
-  buildExpandNodePrompt,
-  assembleTreeFromParsedData,
-  assembleSubNodesFromParsedData,
-} from "./llmShared";
+import { FallbackReason } from "./llmShared";
+import { ModelCaller } from "./llmSplit";
+import { RunResult, runExpandNode, runGenerateTree } from "./llmRunner";
 
 export type { FallbackReason };
 
 // Client-side counterpart to server.ts's Gemini calls, used when the packaged Android app can't
 // reach our Express backend (a Capacitor app ships no bundled Node server) - calls Gemini
-// directly from the device using the user's own key from apiKeyStore. Kept independent from
-// server.ts (which imports Node built-ins that don't bundle for the browser) but mirrors its
-// prompt/quality logic (via llmShared.ts, shared with the OpenAI and Anthropic client modules)
-// so a standalone app and a server-backed deployment behave the same way.
+// directly from the device using the user's own key from apiKeyStore.
+//
+// This module owns only the HTTP call. Prompt text, JSON repair and tree assembly live in
+// llmShared.ts; the retry / ungrounded-retry / split-and-reassemble escalation lives in
+// llmRunner.ts, shared with the OpenAI and Anthropic clients so all three behave identically.
 
-/**
- * Generate a learning tree directly from the client (Android standalone app mode).
- * Uses the device-stored API key to call Google Gemini directly, with Search grounding enabled
- * so resource links come from real search results rather than the model's own guesses.
- */
-export async function generateLearningTreeClient(
-  request: GenerateTreeRequest
-): Promise<{ success: boolean; tree: LearningTree; isFallback?: boolean; fallbackReason?: FallbackReason }> {
-  const apiKey = await getStoredApiKey("gemini");
-  if (!apiKey) {
-    throw new Error("API_KEY_MISSING");
-  }
+const MODEL = "gemini-3.6-flash";
 
-  const { topic, language = "he", depthLevel = "comprehensive", customInstructions = "" } = request;
+function makeGeminiCaller(apiKey: string): ModelCaller {
+  const ai = new GoogleGenAI({ apiKey });
 
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const prompt = buildGenerateTreePrompt(topic, language, depthLevel as any, customInstructions);
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: prompt,
-      config: { temperature: 0.2, tools: [{ googleSearch: {} }] },
-    });
-
-    const text = response.text || "";
-    let parsedTreeData: any;
-    try {
-      parsedTreeData = parseJsonFromModelText(text);
-    } catch (parseErr) {
-      return { success: true, tree: buildFallbackTree(topic, language as any), isFallback: true, fallbackReason: "parse_error" };
+  return async (prompt, opts) => {
+    const config: any = { temperature: 0.2 };
+    // Google Search grounding is what makes the resource links real rather than guessed, so it is
+    // on by default - but it draws on a separate, much smaller quota than the model itself, which
+    // is why the runner can ask for an ungrounded retry.
+    if (opts?.grounded !== false) {
+      config.tools = [{ googleSearch: {} }];
     }
 
-    const learningTree = assembleTreeFromParsedData(parsedTreeData, topic, language);
-    return { success: true, tree: learningTree };
-  } catch (err: any) {
-    if (err?.message === "API_KEY_MISSING") throw err;
-    return { success: true, tree: buildFallbackTree(topic, language as any), isFallback: true, fallbackReason: classifyProviderError(err) };
-  }
+    const response = await ai.models.generateContent({ model: MODEL, contents: prompt, config });
+    return response.text || "";
+  };
 }
 
 /**
- * Expand a tree node directly from the client (Android standalone app mode). Mirrors the
- * server's anti-repetition rules (existing titles + ancestor chain) so branch expansion doesn't
- * regress to lower-quality dedup once a device is running standalone.
+ * Generate a learning tree directly from the client (Android standalone app mode).
  */
-export async function expandTreeNodeClient(
-  request: ExpandNodeRequest
-): Promise<{ success: boolean; isEndOfTopic?: boolean; subNodes?: any[]; message?: string; isFallback?: boolean; fallbackReason?: FallbackReason }> {
+export async function generateLearningTreeClient(
+  request: GenerateTreeRequest
+): Promise<{ success: boolean; tree: LearningTree } & RunResult> {
   const apiKey = await getStoredApiKey("gemini");
   if (!apiKey) {
     throw new Error("API_KEY_MISSING");
   }
+  return runGenerateTree(makeGeminiCaller(apiKey), request);
+}
 
-  const { treeTopic, nodeId, nodeTitle, nodeDescription, nodeDepth = 0, ancestors = [], existingTreeContext = "", language = "he" } = request;
-  const isHe = language === 'he';
-
-  if (nodeDepth >= MAX_NODE_EXPANSION_DEPTH) {
-    return {
-      success: true,
-      isEndOfTopic: true,
-      subNodes: [],
-      message: isHe ? "הענף הגיע לעומק מפורט מרבי" : "Branch reached maximum depth level",
-    };
+/**
+ * Expand a tree node directly from the client (Android standalone app mode). Mirrors the server's
+ * anti-repetition rules (existing titles + ancestor chain) so branch expansion doesn't regress to
+ * lower-quality dedup once a device is running standalone.
+ */
+export async function expandTreeNodeClient(
+  request: ExpandNodeRequest
+): Promise<{ success: boolean; isEndOfTopic?: boolean; subNodes?: any[]; message?: string } & RunResult> {
+  const apiKey = await getStoredApiKey("gemini");
+  if (!apiKey) {
+    throw new Error("API_KEY_MISSING");
   }
-
-  const existingTitlesList: string[] = existingTreeContext
-    ? existingTreeContext.split(',').map((s) => s.trim()).filter(Boolean)
-    : [];
-  const ancestorChain = Array.isArray(ancestors) ? ancestors.filter(Boolean) : [];
-
-  try {
-    const ai = new GoogleGenAI({ apiKey });
-    const prompt = buildExpandNodePrompt(treeTopic, nodeTitle, nodeDescription, nodeDepth, ancestorChain, existingTitlesList, language);
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: prompt,
-      config: { temperature: 0.2, tools: [{ googleSearch: {} }] },
-    });
-
-    const text = response.text || "";
-    const data = parseJsonFromModelText(text);
-    const result = assembleSubNodesFromParsedData(data, nodeId, existingTitlesList, treeTopic, nodeTitle, language);
-
-    return { success: true, isEndOfTopic: result.isEndOfTopic, subNodes: result.subNodes, message: result.message };
-  } catch (err: any) {
-    if (err?.message === "API_KEY_MISSING") throw err;
-    // Deliberately NOT isEndOfTopic here (that would permanently mark the node exhausted) - this
-    // is a transient API failure, not a real "nothing left to expand" result, and the caller
-    // should let the user retry rather than silently telling them the branch is fully covered.
-    return { success: true, isEndOfTopic: false, subNodes: [], isFallback: true, fallbackReason: classifyProviderError(err) };
-  }
+  return runExpandNode(makeGeminiCaller(apiKey), request);
 }

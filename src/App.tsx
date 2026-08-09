@@ -14,7 +14,7 @@ import {
   MAX_NODE_EXPANSION_DEPTH
 } from './lib/treeStore';
 import { exportTreeToImage, exportTreeToJson, exportTreeToPdf, SaveOutcome } from './lib/exportUtils';
-import { generateLearningTreeClient, expandTreeNodeClient } from './lib/llmClient';
+import { generateLearningTreeClient, expandTreeNodeClient, getActiveProviderLabel } from './lib/llmClient';
 import { LearningTree, TreeNode, Resource } from './types';
 import { Header } from './components/Header';
 import { VisualTreeGraph } from './components/VisualTreeGraph';
@@ -38,29 +38,55 @@ import {
   AlertCircle
 } from 'lucide-react';
 
-// Turns a server/client fallbackReason code into a user-facing explanation of why a lower-quality
-// fallback tree/branch was substituted, so a rate limit or auth problem doesn't just look like the
-// AI silently deciding a topic is trivial or fully covered.
-function fallbackReasonMessage(reason: string, language: 'he' | 'en'): string {
+// Turns a server/client fallbackReason code into a user-facing explanation of what actually went
+// wrong, so a problem doesn't just look like the AI silently deciding a topic is fully covered.
+//
+// These messages are deliberately specific about which limit was hit. The previous version mapped
+// every 429 onto "your API key's quota is used up" - a claim that was usually false (a per-minute
+// burst limit and an exhausted daily quota are the same status code) and that named Gemini even
+// when the user had selected OpenAI or Anthropic. By the time this message is shown the app has
+// already retried, dropped search grounding, and rebuilt the request as several smaller ones, so
+// it can say honestly that the limit is a hard one.
+function fallbackReasonMessage(reason: string | undefined, language: 'he' | 'en', provider: string): string {
   const isHe = language === 'he';
   switch (reason) {
     case 'rate_limit':
       return isHe
-        ? 'מפתח ה-API הגיע למגבלת השימוש (Rate Limit / Quota) של Gemini. מוצג תוכן בסיסי במקום. נסה שוב בעוד כמה דקות.'
-        : "The Gemini API key hit its usage limit (rate limit / quota). Showing basic fallback content instead - try again in a few minutes.";
+        ? `${provider} הגביל את קצב הבקשות (Rate Limit). זו מגבלה זמנית - לא סימן שהמכסה נגמרה. ניסינו שוב ובפיצול לבקשות קטנות ועדיין לא עבר. נסה שוב בעוד דקה.`
+        : `${provider} is rate-limiting requests. This is a temporary burst limit, not a sign your quota is gone. We retried and split the request into smaller ones and it still didn't get through - try again in a minute.`;
+    case 'grounding_limit':
+      return isHe
+        ? `מכסת חיפוש הרשת (Search Grounding) של ${provider} נגמרה. מכסת המודל עצמו כנראה תקינה - קישורי המקורות יהיו פחות מדויקים.`
+        : `${provider}'s web-search grounding quota is used up. The model's own quota is probably fine - resource links will just be less precise.`;
+    case 'quota_exhausted':
+      return isHe
+        ? `המכסה או היתרה של חשבון ${provider} נגמרה. המתנה לא תעזור - יש לחדש את החיוב או להמתין לאיפוס היומי.`
+        : `Your ${provider} account's quota or credit balance is used up. Waiting won't help - top up billing or wait for the daily reset.`;
     case 'auth_error':
       return isHe
-        ? 'מפתח ה-API אינו תקין או שאין לו הרשאה. בדוק את המפתח בהגדרות. מוצג תוכן בסיסי במקום.'
-        : 'The API key is invalid or unauthorized. Check your key in Settings. Showing basic fallback content instead.';
+        ? `מפתח ה-API של ${provider} אינו תקין או שאין לו הרשאה. בדוק את המפתח בהגדרות.`
+        : `The ${provider} API key is invalid or unauthorized. Check your key in Settings.`;
+    case 'server_key_missing':
+      return isHe
+        ? 'בשרת לא מוגדר מפתח API. יש להזין מפתח אישי בהגדרות.'
+        : 'The server has no API key configured. Enter your own key in Settings.';
     case 'parse_error':
       return isHe
-        ? 'לא התקבלה תגובה תקינה מהבינה המלאכותית. מוצג תוכן בסיסי במקום.'
-        : "Didn't get a valid response from the AI. Showing basic fallback content instead.";
+        ? 'לא התקבלה תגובה תקינה מהבינה המלאכותית, גם אחרי ניסיון בבקשות קטנות יותר.'
+        : "Didn't get a valid response from the AI, even after retrying as smaller requests.";
     default:
       return isHe
-        ? 'אירעה שגיאה בפנייה לבינה המלאכותית. מוצג תוכן בסיסי במקום.'
-        : 'Something went wrong contacting the AI. Showing basic fallback content instead.';
+        ? 'אירעה שגיאה בפנייה לבינה המלאכותית.'
+        : 'Something went wrong contacting the AI.';
   }
+}
+
+// Shown when the split path succeeded but some of its smaller calls didn't: the nodes are real,
+// a few are just missing their checklist items and resources.
+function partialResultMessage(language: 'he' | 'en'): string {
+  return language === 'he'
+    ? 'הבקשה פוצלה לבקשות קטנות כדי לעקוף מגבלת קצב. חלק מהצמתים עדיין ללא פריטים ומקורות - אפשר להריץ שוב בהמשך כדי להשלים.'
+    : 'The request was split into smaller ones to get past a rate limit. Some nodes are still missing their items and resources - run again later to fill them in.';
 }
 
 // Raised when our own backend is reachable but rejected the request (rate limit, bad input,
@@ -68,11 +94,29 @@ function fallbackReasonMessage(reason: string, language: 'he' | 'en'): string {
 // packaged Android build and is what the on-device API-key path exists to handle.
 class ServerApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Why the backend failed, using the shared FailureKind codes. Undefined for older responses. */
+  fallbackReason?: string;
+  constructor(message: string, status: number, fallbackReason?: string) {
     super(message);
     this.name = 'ServerApiError';
     this.status = status;
+    this.fallbackReason = fallbackReason;
   }
+}
+
+/**
+ * Should we retry this backend failure using the user's own on-device key?
+ *
+ * Yes for anything that is about the *backend's* access to the model - it has no key configured,
+ * its key is invalid, its quota is gone, or its own per-IP throttle refused us. The user's
+ * personal key is a completely separate budget and is exactly what should be used instead. The
+ * deployment having no key at all is the normal configuration for this app, since keys are meant
+ * to be the user's own.
+ *
+ * No for a 400: the request itself was malformed, so re-sending it anywhere fails the same way.
+ */
+function shouldRetryOnDevice(err: ServerApiError): boolean {
+  return err.status !== 400;
 }
 
 /**
@@ -108,7 +152,7 @@ async function callBackend(endpoint: string, payload: unknown): Promise<any> {
   }
 
   if (!response.ok || !data?.success) {
-    throw new ServerApiError(data?.error || `HTTP ${response.status}`, response.status);
+    throw new ServerApiError(data?.error || `HTTP ${response.status}`, response.status, data?.fallbackReason);
   }
   return data;
 }
@@ -117,6 +161,11 @@ async function callBackend(endpoint: string, payload: unknown): Promise<any> {
 // the user always learns *why* the request was refused rather than being told to enter an API key.
 function serverErrorMessage(err: ServerApiError, language: 'he' | 'en'): string {
   const isHe = language === 'he';
+  if (err.fallbackReason === 'server_key_missing') {
+    return isHe
+      ? 'בשרת לא מוגדר מפתח API, ולא נמצא מפתח אישי במכשיר. הזן מפתח בהגדרות כדי להמשיך.'
+      : 'The server has no API key configured, and no personal key is stored on this device. Enter one in Settings to continue.';
+  }
   if (err.status === 429) {
     return isHe
       ? 'הגעת למגבלת השימוש של השרת (יותר מדי בקשות). המתן מספר דקות ונסה שוב, או הזן מפתח API אישי בהגדרות כדי לעקוף את המגבלה.'
@@ -165,6 +214,9 @@ export default function App() {
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Display name of the LLM provider selected in Settings, so API error messages can name the
+  // service the user actually chose instead of always saying "Gemini".
+  const [providerLabel, setProviderLabel] = useState<string>('Gemini');
 
   // Language Effect: Update document dir and lang
   useEffect(() => {
@@ -186,14 +238,27 @@ export default function App() {
     }
   }, []);
 
+  // Keep the provider label in sync: on mount, and whenever Settings closes (where it can change).
+  useEffect(() => {
+    let cancelled = false;
+    getActiveProviderLabel()
+      .then(label => { if (!cancelled) setProviderLabel(label); })
+      .catch(() => { /* keep the current label - this only affects message wording */ });
+    return () => { cancelled = true; };
+  }, [isSettingsOpen]);
+
   // Current Active Tree
   const currentTree = savedTrees.find(t => t.id === activeTreeId) || null;
 
-  // Show Toast helper
-  const showToast = (msg: string) => {
+  // Show Toast helper. API failure explanations need longer than a normal confirmation toast -
+  // they tell the user which limit was hit and what to do about it.
+  const showToast = (msg: string, durationMs: number = 3500) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    setTimeout(() => setToastMessage(null), durationMs);
   };
+
+  const showFailureToast = (reason: string | undefined) =>
+    showToast(fallbackReasonMessage(reason, language, providerLabel), 8000);
 
   // Helper to update current active tree and save
   const updateCurrentTree = (mutator: (tree: LearningTree) => LearningTree) => {
@@ -345,20 +410,35 @@ export default function App() {
     try {
       let rawTree: LearningTree;
       let fallbackReason: string | undefined;
+      let isPartial = false;
 
       try {
         const data = await callBackend('/api/generate-tree', { topic, language, depthLevel, customInstructions });
         rawTree = updateTreeCompletionStatus(data.tree);
         if (data.isFallback) fallbackReason = data.fallbackReason;
+        if (data.isPartial) isPartial = true;
       } catch (serverErr) {
-        // A backend that answered with an error (rate limit, bad request) must surface as that
-        // error - retrying on-device would hide it behind a misleading "enter an API key" prompt.
-        if (serverErr instanceof ServerApiError) throw serverErr;
-        // Genuinely no backend (standalone Android build) - call the model directly from the
-        // device using the user's own stored key.
-        const clientResult = await generateLearningTreeClient({ topic, language, depthLevel, customInstructions });
-        rawTree = updateTreeCompletionStatus(clientResult.tree);
-        if (clientResult.isFallback) fallbackReason = clientResult.fallbackReason;
+        // A malformed request fails the same way anywhere, so surface it as-is. Every other
+        // backend failure is about the *backend's* access to the model - no key configured, its
+        // key rejected, its quota gone, its own per-IP throttle - and the user's personal key is a
+        // separate budget, so it is worth trying. A deployment with no server key at all is the
+        // normal configuration here, and this is the path that lets the entered key be used.
+        if (serverErr instanceof ServerApiError && !shouldRetryOnDevice(serverErr)) throw serverErr;
+        try {
+          const clientResult = await generateLearningTreeClient({ topic, language, depthLevel, customInstructions });
+          rawTree = updateTreeCompletionStatus(clientResult.tree);
+          if (clientResult.isFallback) fallbackReason = clientResult.fallbackReason;
+          if (clientResult.isPartial) isPartial = true;
+        } catch (deviceErr: any) {
+          // No personal key either: the backend's own reason is more informative than a bare
+          // "enter a key" - except when the backend's reason IS "there is no key", in which case
+          // prompting for one is exactly right.
+          if (deviceErr?.message === 'API_KEY_MISSING' && serverErr instanceof ServerApiError
+              && serverErr.fallbackReason !== 'server_key_missing') {
+            throw serverErr;
+          }
+          throw deviceErr;
+        }
       }
 
       const subNodesList = Object.values(rawTree.nodes).filter(n => n.id !== rawTree.rootNodeId);
@@ -377,7 +457,9 @@ export default function App() {
       // fallback tree was substituted - tell the user explicitly instead of letting them think
       // this basic tree IS the real AI-researched result.
       if (fallbackReason) {
-        showToast(fallbackReasonMessage(fallbackReason, language));
+        showFailureToast(fallbackReason);
+      } else if (isPartial) {
+        showToast(partialResultMessage(language), 8000);
       }
 
     } catch (err: any) {
@@ -467,8 +549,11 @@ export default function App() {
     setExpandingNodeId(node.id);
 
     try {
-      // Build context string of current node titles and ancestor titles
-      const contextTitles = (Object.values(currentTree.nodes) as TreeNode[]).map(n => n.title).join(', ');
+      // Titles already in the tree, sent as an array. They used to be comma-joined into one
+      // string that the server split back on ',', which shredded any title containing a comma
+      // into fragments - and short fragments match far too eagerly during dedup, rejecting
+      // legitimate new sub-topics as "duplicates" and ending the branch early.
+      const existingTitles = (Object.values(currentTree.nodes) as TreeNode[]).map(n => n.title);
       const ancestorTitles = getNodeAncestors(currentTree, node.id).map(a => a.title);
       const expandPayload = {
         treeTopic: currentTree.topic,
@@ -477,7 +562,7 @@ export default function App() {
         nodeDescription: node.description,
         nodeDepth,
         ancestors: ancestorTitles,
-        existingTreeContext: contextTitles,
+        existingTitles,
         language,
       };
 
@@ -485,19 +570,25 @@ export default function App() {
       try {
         data = await callBackend('/api/expand-node', expandPayload);
       } catch (serverErr) {
-        // A backend that answered with an error (rate limit, bad request) must surface as that
-        // error - retrying on-device would hide it behind a misleading "enter an API key" prompt.
-        if (serverErr instanceof ServerApiError) throw serverErr;
-        // Genuinely no backend (standalone Android build) - call the model directly from the
-        // device using the user's own stored key.
-        data = await expandTreeNodeClient(expandPayload);
+        // See handleGenerateTree: everything except a malformed request is worth retrying with
+        // the user's own key, which is a separate budget from the backend's.
+        if (serverErr instanceof ServerApiError && !shouldRetryOnDevice(serverErr)) throw serverErr;
+        try {
+          data = await expandTreeNodeClient(expandPayload);
+        } catch (deviceErr: any) {
+          if (deviceErr?.message === 'API_KEY_MISSING' && serverErr instanceof ServerApiError
+              && serverErr.fallbackReason !== 'server_key_missing') {
+            throw serverErr;
+          }
+          throw deviceErr;
+        }
       }
 
-      // A transient API/parse failure with no fallback content to show - this is NOT a real
-      // "nothing left to expand" result, so don't mark the node exhausted (that would
-      // permanently block retrying); just tell the user what happened and let them try again.
-      if (data.isFallback && (!data.subNodes || data.subNodes.length === 0)) {
-        showToast(fallbackReasonMessage(data.fallbackReason, language));
+      // Every attempt failed - retries, the ungrounded retry, and rebuilding the request as
+      // several smaller ones. That is an API problem, NOT a finding that the topic has nothing
+      // left to teach, so the node must not be marked exhausted here.
+      if (data.isFallback) {
+        showFailureToast(data.fallbackReason);
         return;
       }
 
@@ -512,7 +603,6 @@ export default function App() {
       }
 
       const candidateSubNodes: TreeNode[] = data.subNodes;
-      const existingTitles = (Object.values(currentTree.nodes) as TreeNode[]).map(n => n.title);
 
       // Filter out candidates similar to existing tree nodes
       const uniqueCandidates = candidateSubNodes.filter(cand =>
@@ -536,10 +626,11 @@ export default function App() {
         isNewTree: false,
       });
 
-      // The AI request didn't actually succeed and generic fallback branches were substituted -
-      // tell the user explicitly so they don't mistake this for a real AI-researched expansion.
-      if (data.isFallback) {
-        showToast(fallbackReasonMessage(data.fallbackReason, language));
+      // These branches are real model output, but a rate limit forced them to be built from
+      // several smaller calls and some of those didn't land - say so rather than letting the user
+      // wonder why a couple of branches came back without items or resources.
+      if (data.isPartial) {
+        showToast(partialResultMessage(language), 8000);
       }
 
     } catch (err: any) {

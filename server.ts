@@ -5,6 +5,9 @@ import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
 import rateLimit from "express-rate-limit";
 import { MAX_NODE_EXPANSION_DEPTH } from "./src/lib/constants";
+import { FailureKind, classifyFailure, withBurstRetry } from "./src/lib/llmResilience";
+import { ModelCaller, expandNodeViaSplit, generateTreeViaSplit } from "./src/lib/llmSplit";
+import { normalizeExistingTitles } from "./src/lib/llmShared";
 
 dotenv.config();
 
@@ -29,7 +32,9 @@ const generateTreeLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "יותר מדי בקשות ליצירת עצי למידה. נסה שוב בעוד כמה דקות." },
+  // Carry a fallbackReason so the client can tell this app's own per-IP throttle apart from a
+  // limit coming from the AI provider - they are both 429s but they mean different things.
+  message: { success: false, fallbackReason: "rate_limit", error: "יותר מדי בקשות ליצירת עצי למידה. נסה שוב בעוד כמה דקות." },
 });
 
 const expandNodeLimiter = rateLimit({
@@ -37,14 +42,40 @@ const expandNodeLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "יותר מדי בקשות להרחבת ענפים. נסה שוב בעוד כמה דקות." },
+  message: { success: false, fallbackReason: "rate_limit", error: "יותר מדי בקשות להרחבת ענפים. נסה שוב בעוד כמה דקות." },
 });
+
+// True when this deployment has no server-side key at all. That is a legitimate configuration:
+// the app is designed to run on the user's own key, entered in Settings and kept on their device.
+// In that case these routes must FAIL LOUDLY with a 503 so the client falls through to its
+// on-device provider path - previously they returned `success: true` with canned filler, which
+// meant a user who had entered a perfectly good key never got to use it.
+const hasServerKey = () => Boolean(process.env.GEMINI_API_KEY);
+
+function serverKeyMissingResponse(res: any) {
+  return res.status(503).json({
+    success: false,
+    code: "SERVER_KEY_MISSING",
+    fallbackReason: "server_key_missing" as FailureKind,
+    error: "בשרת זה לא מוגדר מפתח API. יש להזין מפתח אישי בהגדרות כדי להשתמש באפליקציה.",
+  });
+}
+
+// Map a provider failure onto an HTTP status the client can act on. The body always carries
+// `fallbackReason` so the UI can say what actually happened instead of guessing "quota".
+function statusForFailure(kind: FailureKind): number {
+  if (kind === "auth_error") return 401;
+  if (kind === "rate_limit" || kind === "grounding_limit") return 429;
+  if (kind === "quota_exhausted") return 402;
+  if (kind === "server_key_missing") return 503;
+  return 502;
+}
 
 // Initialize Gemini Client safely on the server
 function getGeminiClient() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    throw new Error("GEMINI_API_KEY environment variable is not configured.");
+    throw new Error("SERVER_KEY_MISSING");
   }
   return new GoogleGenAI({
     apiKey,
@@ -225,241 +256,6 @@ async function verifyAndFixResourceUrls(nodes: any[], topic: string): Promise<vo
   await Promise.all(checks);
 }
 
-// Helper to build fallback Learning Tree when AI rate limit / quota is exceeded or unavailable
-function buildFallbackTree(topic: string, language: 'he' | 'en' = 'he') {
-  const now = new Date().toISOString();
-  const treeId = `tree_${Date.now()}`;
-  const rootNodeId = "node_root";
-  const cleanTopic = topic.trim();
-  const isHe = language === 'he';
-
-  const nodesRecord: Record<string, any> = {
-    [rootNodeId]: {
-      id: rootNodeId,
-      title: cleanTopic,
-      description: isHe 
-        ? `נתיב למידה מקיף ומדורג לרכישת שליטה ב-${cleanTopic}, החל מיסודות ועד להתמחות מתקדמת.`
-        : `Comprehensive and progressive learning path to master ${cleanTopic}, from fundamentals to advanced specialization.`,
-      level: "foundation",
-      isBaseNode: true,
-      parentId: null,
-      childrenIds: ["node_foundation_1", "node_core_1"],
-      completed: false,
-      items: [
-        { id: `${rootNodeId}_item_0`, text: isHe ? `הבנת התמונה הרחבה וחשיבות ${cleanTopic}` : `Understand the big picture and importance of ${cleanTopic}`, completed: false },
-        { id: `${rootNodeId}_item_1`, text: isHe ? `הכרת המונחים המרכזיים ומפת הדרכים` : `Get familiar with core terminology and roadmap`, completed: false },
-        { id: `${rootNodeId}_item_2`, text: isHe ? `קביעת יעדים ומדדי הצלחה אישיים בלמידה` : `Set goals and personal success metrics`, completed: false },
-      ],
-      resources: [
-        {
-          id: `${rootNodeId}_res_0`,
-          title: isHe ? `קורס אוניברסיטאי: מבוא ל-${cleanTopic}` : `University Course: Intro to ${cleanTopic}`,
-          type: "course_free",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "course_free"),
-          provider: "edX / Harvard & MIT Online",
-          description: isHe ? "קורס אקדמי פתוח מאת אוניברסיטות מובילות" : "Open academic course from top universities",
-          isVerifiedAcademic: true,
-          completed: false,
-        },
-        {
-          id: `${rootNodeId}_res_1`,
-          title: isHe ? `סדרת הרצאות וידאו: ${cleanTopic}` : `Video Lecture Series: ${cleanTopic}`,
-          type: "youtube",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "youtube"),
-          provider: "YouTube Academic / MIT OCW",
-          description: isHe ? "סדרת הרצאות ויזואליות מומלצות" : "Recommended visual video lectures",
-          isVerifiedAcademic: true,
-          completed: false,
-        },
-        {
-          id: `${rootNodeId}_res_2`,
-          title: isHe ? `ספר לימוד וספר אלקטרוני (eBook): ${cleanTopic}` : `Textbook & Electronic eBook: ${cleanTopic}`,
-          type: "book",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "book"),
-          provider: "OpenStax / Google Books",
-          description: isHe ? "ספר עיון אקדמי פתוח ונגיש" : "Open and accessible academic reference book",
-          isVerifiedAcademic: true,
-          completed: false,
-        }
-      ],
-    },
-    "node_foundation_1": {
-      id: "node_foundation_1",
-      title: isHe ? `יסודות ועקרונות בסיסיים ב-${cleanTopic}` : `Fundamentals and Basic Principles of ${cleanTopic}`,
-      description: isHe ? `הקנאת התשתית התיאורטית ומושגי היסוד ההכרחיים לפני מעבר ליישומים מורכבים.` : `Building theoretical groundwork and essential concepts before moving to complex applications.`,
-      level: "foundation",
-      isBaseNode: true,
-      parentId: rootNodeId,
-      childrenIds: ["node_core_2"],
-      completed: false,
-      items: [
-        { id: "node_foundation_1_item_0", text: isHe ? `לימוד מושגי יסוד והגדרות מפתח ב-${cleanTopic}` : `Study core concepts and key definitions in ${cleanTopic}`, completed: false },
-        { id: "node_foundation_1_item_1", text: isHe ? `סיווג תתי-התחומים והקשרים ביניהם` : `Categorize subfields and their relations`, completed: false },
-        { id: "node_foundation_1_item_2", text: isHe ? `תרגול הבנה בסיסית ופתרון שאלות יסוד` : `Practice basic understanding and foundational questions`, completed: false },
-      ],
-      resources: [
-        {
-          id: "node_foundation_1_res_0",
-          title: isHe ? `קורס Coursera: יסודות ${cleanTopic}` : `Coursera Course: ${cleanTopic} Foundations`,
-          type: "course_free",
-          url: "https://www.coursera.org/",
-          provider: "Coursera / Stanford & Yale Online",
-          description: isHe ? "מסלול לימוד מובנה עם תרגול אינטראקטיבי" : "Structured learning track with interactive practice",
-          isVerifiedAcademic: true,
-          completed: false,
-        },
-        {
-          id: "node_foundation_1_res_1",
-          title: isHe ? `קורס מעשי מקיף ב-Udemy` : `Comprehensive Practical Course on Udemy`,
-          type: "course_paid",
-          url: "https://www.udemy.com/",
-          provider: "Udemy Professional",
-          description: isHe ? "קורס וידאו מעשי הכולל תרגול hands-on" : "Practical hands-on video course with projects",
-          isVerifiedAcademic: false,
-          completed: false,
-        },
-        {
-          id: "node_foundation_1_res_2",
-          title: isHe ? `מאמר אקדמי ומסמך יסוד` : `Academic Paper & Core Article`,
-          type: "article",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "article"),
-          provider: "Wikipedia / Academic Sources",
-          description: isHe ? "מאמרי סקירה אקדמיים ומסמכי יסוד" : "Academic review papers and foundational documents",
-          isVerifiedAcademic: true,
-          completed: false,
-        }
-      ],
-    },
-    "node_core_1": {
-      id: "node_core_1",
-      title: isHe ? `ליבת התחום ומתודולוגיות מרכזיות` : `Core Domain and Key Methodologies`,
-      description: isHe ? `העמקה בטכניקות העבודה, הכלים והעקרונות המרכזיים ב-${cleanTopic}.` : `Deep dive into working techniques, tools, and central principles in ${cleanTopic}.`,
-      level: "core",
-      isBaseNode: false,
-      parentId: rootNodeId,
-      childrenIds: ["node_advanced_1"],
-      completed: false,
-      items: [
-        { id: "node_core_1_item_0", text: isHe ? `ניתוח מתודולוגיות מפתח ב-${cleanTopic}` : `Analyze key methodologies in ${cleanTopic}`, completed: false },
-        { id: "node_core_1_item_1", text: isHe ? `עבודה עם כלי עזר ומקורות נתונים מרכזיים` : `Working with primary tools and data sources`, completed: false },
-        { id: "node_core_1_item_2", text: isHe ? `יישום תרגילים מעשיים ברמת ליבה` : `Implement core level practical exercises`, completed: false },
-      ],
-      resources: [
-        {
-          id: "node_core_1_res_0",
-          title: isHe ? `ספר אקדמי וספר אלקטרוני: ${cleanTopic}` : `Textbook & eBook: ${cleanTopic}`,
-          type: "book",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "book"),
-          provider: "Cambridge / OpenStax / O'Reilly",
-          description: isHe ? "ספר עיון מוביל המכסה את כל נושאי הליבה" : "Leading reference book covering all core subjects",
-          isVerifiedAcademic: true,
-          completed: false,
-        },
-        {
-          id: "node_core_1_res_1",
-          title: isHe ? `תיעוד ומדריך רשמי (Official Documentation)` : `Official Documentation & Web Guide`,
-          type: "doc",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "doc"),
-          provider: "Official Docs / Standards Body",
-          description: isHe ? "תיעוד רשמי ומפרט טכני מוסמך" : "Official authoritative documentation and specs",
-          isVerifiedAcademic: true,
-          completed: false,
-        }
-      ],
-    },
-    "node_core_2": {
-      id: "node_core_2",
-      title: isHe ? `יישום מעשי ופתרון בעיות ב-${cleanTopic}` : `Practical Application and Problem Solving in ${cleanTopic}`,
-      description: isHe ? `מעבר מתאוריה למעשה, בניית פרויקטים וניתוח מקרי בוחן (Case Studies).` : `Moving from theory to practice, building projects, and analyzing case studies.`,
-      level: "core",
-      isBaseNode: false,
-      parentId: "node_foundation_1",
-      childrenIds: [],
-      completed: false,
-      items: [
-        { id: "node_core_2_item_0", text: isHe ? `בחינת מקרי בוחן מעשיים מהתעשייה/האקדמיה` : `Examine practical case studies from industry/academia`, completed: false },
-        { id: "node_core_2_item_1", text: isHe ? `פתרון בעיות מורכבות ואיתור שגיאות נפוצות` : `Solve complex problems and identify common errors`, completed: false },
-        { id: "node_core_2_item_2", text: isHe ? `בניית פרויקט אישי קטן ליישום הנלמד` : `Build a small personal project to apply learnings`, completed: false },
-      ],
-      resources: [
-        {
-          id: "node_core_2_res_0",
-          title: isHe ? `פרויקטים מעשיים ב-Udemy & Coursera` : `Practical Projects on Udemy & Coursera`,
-          type: "course_paid",
-          url: "https://www.udemy.com/",
-          provider: "Udemy / Coursera Guided Projects",
-          description: isHe ? "סדנת פרויקטים מעשית לבנייה Hands-on" : "Guided hands-on project workshop",
-          isVerifiedAcademic: false,
-          completed: false,
-        },
-        {
-          id: "node_core_2_res_1",
-          title: isHe ? `סרטון הדרכה ויזואלי ב-YouTube` : `Visual Tutorial Video on YouTube`,
-          type: "youtube",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "youtube"),
-          provider: "FreeCodeCamp / YouTube Tech",
-          description: isHe ? "סרטון פרויקט מודרך שלב אחר שלב" : "Step-by-step guided project video tutorial",
-          isVerifiedAcademic: true,
-          completed: false,
-        }
-      ],
-    },
-    "node_advanced_1": {
-      id: "node_advanced_1",
-      title: isHe ? `נושאים מתקדמים ומחקר ב-${cleanTopic}` : `Advanced Topics and Research in ${cleanTopic}`,
-      description: isHe ? `חקר חזית הידע, מגמות עדכניות וטכניקות מתקדמות של מומחים.` : `Exploring the frontier of knowledge, current trends, and expert advanced techniques.`,
-      level: "advanced",
-      isBaseNode: false,
-      parentId: "node_core_1",
-      childrenIds: [],
-      completed: false,
-      items: [
-        { id: "node_advanced_1_item_0", text: isHe ? `סקירת מאמרים ומגמות חדשניות ב-${cleanTopic}` : `Review innovative articles and trends in ${cleanTopic}`, completed: false },
-        { id: "node_advanced_1_item_1", text: isHe ? `אופטימיזציה, יעילות ואסטרטגיות מתקדמות` : `Optimization, efficiency, and advanced strategies`, completed: false },
-        { id: "node_advanced_1_item_2", text: isHe ? `סיכום אישי ומצגת פרויקט גמר` : `Personal summary and final project presentation`, completed: false },
-      ],
-      resources: [
-        {
-          id: "node_advanced_1_res_0",
-          title: isHe ? `מאמרים ומחקרים אקדמיים (PDFs)` : `Academic Research & Papers (PDFs)`,
-          type: "article",
-          url: sanitizeResourceUrl("", cleanTopic, cleanTopic, "article"),
-          provider: "Wikipedia / arXiv",
-          description: isHe ? "ספריית מאמרים אקדמיים בחזית המחקר" : "Library of leading research papers at the scientific frontier",
-          isVerifiedAcademic: true,
-          completed: false,
-        },
-        {
-          id: "node_advanced_1_res_1",
-          title: isHe ? `קורס מתקדם מאת MIT & Harvard Online` : `Advanced Web Course by MIT & Harvard Online`,
-          type: "course_free",
-          url: "https://www.edx.org/",
-          provider: "MIT / Harvard / edX",
-          description: isHe ? "התמחות מתקדמת לרמת מומחה" : "Advanced specialization for expert mastery",
-          isVerifiedAcademic: true,
-          completed: false,
-        }
-      ],
-    },
-  };
-
-  return {
-    id: treeId,
-    topic: cleanTopic,
-    description: `עץ למידה מובנה ומקיף עבור ${cleanTopic}`,
-    createdAt: now,
-    updatedAt: now,
-    rootNodeId,
-    nodes: nodesRecord,
-    category: "current",
-    searchSourcesUsed: [
-      { title: `edX & Coursera Courses: ${cleanTopic}`, uri: "https://www.edx.org/" },
-      { title: `Academic & Research Papers: ${cleanTopic}`, uri: "https://arxiv.org/" },
-      { title: `YouTube Academic & Video Lectures: ${cleanTopic}`, uri: "https://ocw.mit.edu/" }
-    ],
-  };
-}
-
 function normalizeServerTitle(title: string): string {
   if (!title) return '';
   return title.toLowerCase().trim().replace(/[^\w\u0590-\u05FF]/g, ' ').replace(/\s+/g, ' ');
@@ -521,114 +317,47 @@ function areServerTitlesSimilar(titleA: string, titleB: string): boolean {
   return false;
 }
 
-// Helper to build fallback Sub-Nodes when AI rate limit / quota is exceeded or unavailable
-function buildFallbackSubNodes(treeTopic: string, nodeId: string, nodeTitle: string, nodeDescription: string, language: 'he' | 'en' = 'he', existingTitlesList: string[] = []) {
-  const timestamp = Date.now();
-  const isHe = language === 'he';
+const GEMINI_MODEL = "gemini-3.6-flash";
 
-  const cand1 = isHe ? `ניתוח מקרים מעשיים ב-${nodeTitle}` : `Practical Case Analysis in ${nodeTitle}`;
-  const cand2 = isHe ? `אופטימיזציה וטכניקות מתקדמות ב-${nodeTitle}` : `Optimization & Advanced Techniques in ${nodeTitle}`;
-
-  const candidates = [
-    {
-      id: `${nodeId}_sub_${timestamp}_0`,
-      title: cand1,
-      description: isHe ? `חקר מקרים יישומיים ותרגול מעשי של הכלים ב-${nodeTitle}.` : `Practical case exploration and hands-on exercises in ${nodeTitle}.`,
-      level: "core",
-      isBaseNode: false,
-      parentId: nodeId,
-      childrenIds: [],
-      completed: false,
-      items: [
-        { id: `${nodeId}_sub_${timestamp}_0_item_0`, text: isHe ? `ניתוח תרחישי אמת ומקרי בוחן ב-${nodeTitle}` : `Analyze real scenarios and case studies in ${nodeTitle}`, completed: false },
-        { id: `${nodeId}_sub_${timestamp}_0_item_1`, text: isHe ? `יישום פתרונות וזיהוי אתגרים מרכזיים` : `Implement solutions and identify key challenges`, completed: false },
-      ],
-      resources: [
-        {
-          id: `${nodeId}_sub_${timestamp}_0_res_0`,
-          title: isHe ? `מדריך יישומי: ${nodeTitle}` : `Applied Guide: ${nodeTitle}`,
-          type: "article",
-          url: sanitizeResourceUrl("", nodeTitle, treeTopic, "article"),
-          provider: isHe ? "מקור לימוד מאומת" : "Verified Learning Source",
-          description: isHe ? "חומרי הדרכה מומלצים להעמקה מעשית" : "Recommended instructional materials for practical depth",
-          isVerifiedAcademic: true,
-          completed: false
-        }
-      ]
-    },
-    {
-      id: `${nodeId}_sub_${timestamp}_1`,
-      title: cand2,
-      description: isHe ? `טכניקות מתקדמות, אופטימיזציה ומניעת שגיאות נפוצות ב-${nodeTitle}.` : `Advanced techniques, optimization, and error prevention in ${nodeTitle}.`,
-      level: "advanced",
-      isBaseNode: false,
-      parentId: nodeId,
-      childrenIds: [],
-      completed: false,
-      items: [
-        { id: `${nodeId}_sub_${timestamp}_1_item_0`, text: isHe ? `אופטימיזציה ושיפור ביצועים ב-${nodeTitle}` : `Optimization and performance improvement in ${nodeTitle}`, completed: false },
-        { id: `${nodeId}_sub_${timestamp}_1_item_1`, text: isHe ? `בחינת שגיאות נפוצות ואופן מניעתן` : `Examine common errors and how to prevent them`, completed: false },
-      ],
-      resources: [
-        {
-          id: `${nodeId}_sub_${timestamp}_1_res_0`,
-          title: isHe ? `סרטון הסבר וטכניקות מתקדמות: ${nodeTitle}` : `Explanation & Advanced Techniques Video: ${nodeTitle}`,
-          type: "youtube",
-          url: sanitizeResourceUrl("", nodeTitle, treeTopic, "youtube"),
-          provider: "YouTube Education",
-          description: isHe ? "הסברים ויזואליים וניתוח מעמיק" : "Visual explanations and deep analysis",
-          isVerifiedAcademic: true,
-          completed: false
-        }
-      ]
-    }
-  ];
-
-  return candidates.filter(cand => !existingTitlesList.some(ex => areServerTitlesSimilar(cand.title, ex)));
+function generateContent(ai: any, prompt: string, useSearch: boolean): Promise<any> {
+  const config: any = { temperature: 0.2 };
+  if (useSearch) config.tools = [{ googleSearch: {} }];
+  return ai.models.generateContent({ model: GEMINI_MODEL, contents: prompt, config });
 }
 
-// Helper to call Gemini with retry and fallback on 429 quota / rate limits
-async function callGeminiApiWithRetry(ai: any, prompt: string, useSearch: boolean = true) {
-  const primaryConfig: any = {
-    temperature: 0.2,
+/**
+ * A ModelCaller over the server's Gemini client, so the split-and-reassemble path in llmSplit.ts
+ * can drive the server exactly the way it drives the on-device clients.
+ */
+function makeServerCaller(ai: any): ModelCaller {
+  return async (prompt, opts) => {
+    const response = await generateContent(ai, prompt, opts?.grounded !== false);
+    return response?.text || "";
   };
-  if (useSearch) {
-    primaryConfig.tools = [{ googleSearch: {} }];
-  }
+}
 
+/**
+ * Call Gemini with backoff on transient failures, plus one ungrounded retry when Google Search
+ * grounding specifically is what ran out.
+ *
+ * Grounding draws on a separate, much smaller quota than the model itself, so a grounded call
+ * failing says nothing about whether the key has quota left - dropping grounding usually gets
+ * straight through (at the cost of guessed rather than searched resource links).
+ *
+ * Hard quota and auth failures are NOT retried: they are the same in five seconds, and retrying
+ * only delays an accurate message to the user.
+ */
+async function callGeminiApiWithRetry(ai: any, prompt: string, useSearch: boolean = true) {
   try {
-    return await ai.models.generateContent({
-      model: "gemini-3.6-flash",
-      contents: prompt,
-      config: primaryConfig,
+    return await withBurstRetry(() => generateContent(ai, prompt, useSearch), {
+      attempts: 3,
+      onRetry: ({ attempt, waitMs, failure }) =>
+        console.warn(`[Gemini API] ${failure.kind} (attempt ${attempt}). Retrying in ${waitMs}ms.`),
     });
   } catch (err: any) {
-    const isRateLimit = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
-    if (isRateLimit && useSearch) {
-      console.warn("[Gemini API] 429 Rate Limit/Quota hit with Search Grounding. Retrying immediately WITHOUT search grounding...");
-      try {
-        return await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: prompt,
-          config: { temperature: 0.2 },
-        });
-      } catch (retryErr: any) {
-        console.warn("[Gemini API] 2nd attempt failed. Waiting 1.5s before final attempt...", retryErr?.message || retryErr);
-        await new Promise((r) => setTimeout(r, 1500));
-        return await ai.models.generateContent({
-          model: "gemini-3.6-flash",
-          contents: prompt,
-          config: { temperature: 0.2 },
-        });
-      }
-    } else if (isRateLimit) {
-      console.warn("[Gemini API] 429 Rate Limit hit. Waiting 1.5s before retry...");
-      await new Promise((r) => setTimeout(r, 1500));
-      return await ai.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: { temperature: 0.2 },
-      });
+    if (useSearch && classifyFailure(err).kind === "grounding_limit") {
+      console.warn("[Gemini API] Search-grounding quota exhausted. Retrying without grounding.");
+      return await withBurstRetry(() => generateContent(ai, prompt, false), { attempts: 2 });
     }
     throw err;
   }
@@ -645,6 +374,7 @@ app.post("/api/generate-tree", generateTreeLimiter, async (req, res) => {
   if (!topic || typeof topic !== "string" || !topic.trim()) {
     return res.status(400).json({ error: "נושא הוא שדה חובה" });
   }
+  if (!hasServerKey()) return serverKeyMissingResponse(res);
 
   // Node-count & coverage guidance driven by the depthLevel the user picked in the UI
   // ('basic' | 'comprehensive' | 'mastery') - previously this field was accepted but ignored,
@@ -759,9 +489,21 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
     try {
       parsedTreeData = parseJsonFromGemini(text);
     } catch (parseErr) {
-      console.warn("JSON parse warning from Gemini tree response, using fallback tree:", parseErr?.message || parseErr);
-      const fallbackTree = buildFallbackTree(topic, language);
-      return res.json({ success: true, tree: fallbackTree, isFallback: true, fallbackReason: "parse_error" });
+      // A truncated / malformed response is usually an output-size problem, and the split path
+      // asks for a fraction of that output per call - so rebuild rather than serve filler.
+      console.warn("JSON parse warning from Gemini tree response, rebuilding via split requests:", parseErr?.message || parseErr);
+      try {
+        const split = await generateTreeViaSplit(makeServerCaller(ai), topic, language, depthLevel, undefined);
+        return res.json({ success: true, tree: split.tree, isSplit: true, isPartial: split.partial });
+      } catch (splitErr: any) {
+        const kind = classifyFailure(splitErr).kind;
+        console.warn("Split rebuild failed after parse error:", splitErr?.message || splitErr);
+        return res.status(statusForFailure(kind)).json({
+          success: false,
+          fallbackReason: kind === "api_error" ? "parse_error" : kind,
+          error: "לא התקבלה תגובה תקינה מהבינה המלאכותית.",
+        });
+      }
     }
 
     // Extract search grounding metadata and filter out search engine query pages
@@ -840,25 +582,39 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
 
     return res.json({ success: true, tree: learningTree });
   } catch (err: any) {
-    const isRateLimit = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
-    const isAuthError = err?.status === 401 || err?.status === 403 || err?.message?.includes("API_KEY_INVALID") || err?.message?.includes("PERMISSION_DENIED");
-    console.warn("Gemini API call failed, generating intelligent fallback tree:", err?.message || err);
-    const fallbackTree = buildFallbackTree(topic, language);
-    return res.json({
-      success: true,
-      tree: fallbackTree,
-      isFallback: true,
-      fallbackReason: isRateLimit ? "rate_limit" : isAuthError ? "auth_error" : "api_error",
+    const failure = classifyFailure(err);
+    if (failure.kind === "server_key_missing") return serverKeyMissingResponse(res);
+    console.warn(`Gemini generate-tree failed (${failure.kind}):`, err?.message || err);
+
+    // A short-term burst limit means the request was too big for right now, not that the key is
+    // spent - so rebuild the same tree from one small outline call plus spaced detail calls.
+    if (failure.kind === "rate_limit" || failure.kind === "grounding_limit") {
+      try {
+        const split = await generateTreeViaSplit(makeServerCaller(getGeminiClient()), topic, language, depthLevel, failure);
+        return res.json({ success: true, tree: split.tree, isSplit: true, isPartial: split.partial });
+      } catch (splitErr: any) {
+        console.warn("Split rebuild failed after rate limit:", splitErr?.message || splitErr);
+      }
+    }
+
+    // Report the real failure with a real status code. The client then falls through to the
+    // user's own on-device key, which is exactly what it could never do while this returned 200.
+    return res.status(statusForFailure(failure.kind)).json({
+      success: false,
+      fallbackReason: failure.kind,
+      retryAfterMs: failure.retryAfterMs,
+      error: "הפנייה לבינה המלאכותית נכשלה.",
     });
   }
 });
 
 // Expand Node Route - Creates sub-branches under a chosen node
 app.post("/api/expand-node", expandNodeLimiter, async (req, res) => {
-  const { treeTopic, nodeId, nodeTitle, nodeDescription, nodeDepth = 0, ancestors = [], existingTreeContext = "", language = "he" } = req.body;
+  const { treeTopic, nodeId, nodeTitle, nodeDescription, nodeDepth = 0, ancestors = [], existingTitles, existingTreeContext = "", language = "he" } = req.body;
   if (!treeTopic || !nodeId || !nodeTitle) {
     return res.status(400).json({ error: "פרטי הנושא והצומת חסרים" });
   }
+  if (!hasServerKey()) return serverKeyMissingResponse(res);
 
   // Hard safety ceiling only (bounds cost / prevents runaway trees) - deliberately generous so it
   // doesn't block expansion attempts in advance at shallow depths. Normal stopping happens earlier,
@@ -872,10 +628,10 @@ app.post("/api/expand-node", expandNodeLimiter, async (req, res) => {
     });
   }
 
-  // Parse existing titles array
-  const existingTitlesList: string[] = existingTreeContext
-    ? existingTreeContext.split(',').map((s: string) => s.trim()).filter(Boolean)
-    : [];
+  // Titles already in the tree, used for the anti-repetition prompt and for dedup. Prefers the
+  // array form; the old comma-joined string is still accepted but shredded any title containing a
+  // comma into fragments that then matched far too eagerly (see normalizeExistingTitles).
+  const existingTitlesList: string[] = normalizeExistingTitles(existingTitles, existingTreeContext);
 
   const ancestorChain = Array.isArray(ancestors) ? ancestors.filter(Boolean) : [];
 
@@ -950,10 +706,32 @@ Instructions:
     try {
       parsedData = parseJsonFromGemini(text);
     } catch (parseErr) {
-      console.warn("JSON parse warning on expand node, using fallback subnodes:", parseErr?.message || parseErr);
-      const fallbackSubNodes = buildFallbackSubNodes(treeTopic, nodeId, nodeTitle, nodeDescription, language, existingTitlesList);
-      const isEndOfTopic = fallbackSubNodes.length === 0;
-      return res.json({ success: true, parentNodeId: nodeId, subNodes: fallbackSubNodes, isFallback: true, fallbackReason: "parse_error", isEndOfTopic });
+      // Truncated / malformed JSON is an output-size problem more often than a model problem, and
+      // each split call asks for a fraction of that output - so rebuild instead of serving filler.
+      console.warn("JSON parse warning on expand node, rebuilding via split requests:", parseErr?.message || parseErr);
+      try {
+        const split = await expandNodeViaSplit(
+          makeServerCaller(ai),
+          { treeTopic, nodeId, nodeTitle, nodeDescription, ancestorChain, existingTitlesList, language },
+          undefined
+        );
+        return res.json({
+          success: true,
+          parentNodeId: nodeId,
+          subNodes: split.subNodes,
+          isEndOfTopic: split.isEndOfTopic,
+          isSplit: true,
+          isPartial: split.partial,
+        });
+      } catch (splitErr: any) {
+        const kind = classifyFailure(splitErr).kind;
+        console.warn("Split rebuild failed after parse error:", splitErr?.message || splitErr);
+        return res.status(statusForFailure(kind)).json({
+          success: false,
+          fallbackReason: kind === "api_error" ? "parse_error" : kind,
+          error: "לא התקבלה תגובה תקינה מהבינה המלאכותית.",
+        });
+      }
     }
 
     const createdSubNodes: any[] = [];
@@ -1015,18 +793,41 @@ Instructions:
     const isEndOfTopic = createdSubNodes.length === 0;
     return res.json({ success: true, parentNodeId: nodeId, subNodes: createdSubNodes, isEndOfTopic });
   } catch (err: any) {
-    const isRateLimit = err?.status === 429 || err?.message?.includes("429") || err?.message?.includes("RESOURCE_EXHAUSTED");
-    const isAuthError = err?.status === 401 || err?.status === 403 || err?.message?.includes("API_KEY_INVALID") || err?.message?.includes("PERMISSION_DENIED");
-    console.warn("Gemini API call failed for expand-node, using fallback sub-nodes generator:", err?.message || err);
-    const fallbackSubNodes = buildFallbackSubNodes(treeTopic, nodeId, nodeTitle, nodeDescription, language, existingTitlesList);
-    const isEndOfTopic = fallbackSubNodes.length === 0;
-    return res.json({
-      success: true,
+    const failure = classifyFailure(err);
+    if (failure.kind === "server_key_missing") return serverKeyMissingResponse(res);
+    console.warn(`Gemini expand-node failed (${failure.kind}):`, err?.message || err);
+
+    // Short-term burst limit: the request was too much right now, not proof the key is spent.
+    // Rebuild the sub-branches from one small outline call plus spaced detail calls.
+    if (failure.kind === "rate_limit" || failure.kind === "grounding_limit") {
+      try {
+        const split = await expandNodeViaSplit(
+          makeServerCaller(getGeminiClient()),
+          { treeTopic, nodeId, nodeTitle, nodeDescription, ancestorChain, existingTitlesList, language },
+          failure
+        );
+        return res.json({
+          success: true,
+          parentNodeId: nodeId,
+          subNodes: split.subNodes,
+          isEndOfTopic: split.isEndOfTopic,
+          isSplit: true,
+          isPartial: split.partial,
+        });
+      } catch (splitErr: any) {
+        console.warn("Split rebuild failed after rate limit:", splitErr?.message || splitErr);
+      }
+    }
+
+    // Report the real failure with a real status code, and deliberately WITHOUT isEndOfTopic: an
+    // API failure is not a finding that the topic has nothing left to teach. Sending isEndOfTopic
+    // here used to let the client permanently disable this branch's expand button.
+    return res.status(statusForFailure(failure.kind)).json({
+      success: false,
       parentNodeId: nodeId,
-      subNodes: fallbackSubNodes,
-      isFallback: true,
-      fallbackReason: isRateLimit ? "rate_limit" : isAuthError ? "auth_error" : "api_error",
-      isEndOfTopic,
+      fallbackReason: failure.kind,
+      retryAfterMs: failure.retryAfterMs,
+      error: "הרחבת הענף נכשלה.",
     });
   }
 });
