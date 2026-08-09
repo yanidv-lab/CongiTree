@@ -110,10 +110,14 @@ export async function getStoredApiKey(provider?: LlmProvider): Promise<string> {
     } catch (err) {
       // Ignore
     }
-    // Check fallback from Vite environment variable if available
-    return (import.meta.env.VITE_GEMINI_API_KEY as string) || '';
   }
 
+  // Deliberately NO build-time env fallback here. Vite inlines every VITE_* variable into the
+  // client bundle at build time, so reading one would bake whatever key the build machine had
+  // straight into the shipped JavaScript and into the Android APK - in a public repository, and
+  // in an app whose whole key model is "each user supplies their own, stored on their own
+  // device". A server-side key still works: it lives in GEMINI_API_KEY, is read only by
+  // server.ts, and never reaches the browser.
   return '';
 }
 
