@@ -355,8 +355,13 @@ async function callGeminiApiWithRetry(ai: any, prompt: string, useSearch: boolea
         console.warn(`[Gemini API] ${failure.kind} (attempt ${attempt}). Retrying in ${waitMs}ms.`),
     });
   } catch (err: any) {
-    if (useSearch && classifyFailure(err).kind === "grounding_limit") {
-      console.warn("[Gemini API] Search-grounding quota exhausted. Retrying without grounding.");
+    // Grounding is provisioned separately from the model, so a key that cannot use it (free tier,
+    // no billing, unsupported model) rejects the *tool* - sometimes with an error that mentions
+    // neither quotas nor grounding. Retrying without it is cheap and always preferable to failing,
+    // so this covers every failure except the ones that are about the key itself.
+    const kind = classifyFailure(err).kind;
+    if (useSearch && kind !== "auth_error" && kind !== "quota_exhausted" && kind !== "server_key_missing") {
+      console.warn(`[Gemini API] Grounded call failed (${kind}). Retrying without search grounding.`);
       return await withBurstRetry(() => generateContent(ai, prompt, false), { attempts: 2 });
     }
     throw err;
@@ -602,6 +607,7 @@ ${customInstructions ? `Additional user instructions: ${customInstructions}` : '
     return res.status(statusForFailure(failure.kind)).json({
       success: false,
       fallbackReason: failure.kind,
+      fallbackDetail: failure.detail,
       retryAfterMs: failure.retryAfterMs,
       error: "הפנייה לבינה המלאכותית נכשלה.",
     });
@@ -826,6 +832,7 @@ Instructions:
       success: false,
       parentNodeId: nodeId,
       fallbackReason: failure.kind,
+      fallbackDetail: failure.detail,
       retryAfterMs: failure.retryAfterMs,
       error: "הרחבת הענף נכשלה.",
     });

@@ -18,7 +18,7 @@ import {
 //
 // The ladder, in order:
 //   1. One grounded single-shot call, with backoff retries for transient failures.
-//   2. If grounding specifically ran out of quota, the same call again with grounding off.
+//   2. Unless the key itself is the problem, the same call again with search grounding off.
 //   3. If it still fails on a *short-term* limit (or the response came back truncated), rebuild
 //      the same result from a small outline call plus spaced detail calls - see llmSplit.ts.
 //   4. Only then fall back to canned content, tagged with the real reason.
@@ -34,6 +34,15 @@ export interface RunResult {
   isSplit?: boolean;
   /** Set when some of those smaller calls failed and their nodes have no items/resources yet. */
   isPartial?: boolean;
+  /** Set when the result came back without web-search grounding, so resource links are weaker. */
+  isUngrounded?: boolean;
+  /**
+   * The provider's own error text, trimmed. Shown to the user only for the generic buckets
+   * (api_error / parse_error) where our own wording cannot say anything useful - on a phone there
+   * is no console to read, so without this a real cause like "Search Grounding is not supported
+   * for this model" is invisible.
+   */
+  fallbackDetail?: string;
 }
 
 /** A parse failure carries no HTTP status, so tag it explicitly for classifyFailure's callers. */
@@ -45,6 +54,11 @@ function parseFailureError(cause: unknown): Error & { kind: FailureKind } {
   return err;
 }
 
+function detailOf(err: any): string | undefined {
+  const detail = classifyFailure(err).detail;
+  return detail && detail.trim() ? detail.trim() : undefined;
+}
+
 function kindOf(err: any): FailureKind {
   return err?.kind === 'parse_error' ? 'parse_error' : classifyFailure(err).kind;
 }
@@ -52,6 +66,24 @@ function kindOf(err: any): FailureKind {
 /** Worth rebuilding as several smaller calls? Burst limits and truncated output, yes. Dead key, no. */
 function worthSplitting(kind: FailureKind): boolean {
   return isSplittable(kind) || kind === 'parse_error';
+}
+
+/**
+ * Worth retrying the same request with Google Search grounding turned off?
+ *
+ * Yes for everything except failures that are about the key itself. Grounding is an *enhancement*
+ * - it makes resource links come from live search results instead of the model's own recall - so
+ * dropping it is always preferable to returning nothing.
+ *
+ * This deliberately covers plain `api_error` and not just `grounding_limit`. Grounding is a
+ * separately-provisioned feature: a free-tier key, a project without billing enabled, or a model
+ * that doesn't offer the tool can reject the *tool* with a 400 whose text says nothing about
+ * quotas or grounding at all. Classified narrowly, that fell through every recovery rung and
+ * surfaced as "something went wrong contacting the AI" - even though the identical request
+ * without the tool would have worked. One extra request is a cheap price for that.
+ */
+function worthUngroundedRetry(kind: FailureKind): boolean {
+  return kind !== 'auth_error' && kind !== 'quota_exhausted' && kind !== 'server_key_missing';
 }
 
 export async function runGenerateTree(
@@ -80,12 +112,13 @@ export async function runGenerateTree(
     lastErr = err;
   }
 
-  // Grounding has its own, much smaller quota than the model itself, so a grounded call can fail
-  // while the identical ungrounded call succeeds. Resource URLs then lean on sanitizeResourceUrl's
-  // fallback links instead of live search results - a real tree with weaker links.
-  if (kindOf(lastErr) === 'grounding_limit') {
+  // Grounding is provisioned separately from the model and has its own, much smaller allowance, so
+  // a grounded call can fail while the identical ungrounded call succeeds. Resource URLs then lean
+  // on sanitizeResourceUrl's fallback links instead of live search results - a real tree with
+  // weaker links, which beats no tree at all.
+  if (worthUngroundedRetry(kindOf(lastErr))) {
     try {
-      return { success: true, tree: await singleShot(false) };
+      return { success: true, tree: await singleShot(false), isUngrounded: true };
     } catch (err: any) {
       if (err?.message === "API_KEY_MISSING") throw err;
       lastErr = err;
@@ -108,6 +141,7 @@ export async function runGenerateTree(
     tree: buildFallbackTree(topic, language as any),
     isFallback: true,
     fallbackReason: kindOf(lastErr),
+    fallbackDetail: detailOf(lastErr),
   };
 }
 
@@ -163,10 +197,18 @@ export async function runExpandNode(
     lastErr = err;
   }
 
-  if (kindOf(lastErr) === 'grounding_limit') {
+  // See worthUngroundedRetry: grounding is an enhancement that a free-tier or unbilled key may not
+  // be entitled to at all, and its rejection can look like a generic error.
+  if (worthUngroundedRetry(kindOf(lastErr))) {
     try {
       const result = await singleShot(false);
-      return { success: true, isEndOfTopic: result.isEndOfTopic, subNodes: result.subNodes, message: result.message };
+      return {
+        success: true,
+        isEndOfTopic: result.isEndOfTopic,
+        subNodes: result.subNodes,
+        message: result.message,
+        isUngrounded: true,
+      };
     } catch (err: any) {
       if (err?.message === "API_KEY_MISSING") throw err;
       lastErr = err;
@@ -203,5 +245,6 @@ export async function runExpandNode(
     subNodes: [],
     isFallback: true,
     fallbackReason: kindOf(lastErr),
+    fallbackDetail: detailOf(lastErr),
   };
 }

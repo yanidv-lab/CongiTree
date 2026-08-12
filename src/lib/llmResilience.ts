@@ -189,6 +189,14 @@ export async function withBurstRetry<T>(fn: () => Promise<T>, options: BurstRetr
       const failure = classifyFailure(err);
       if (!isTransient(failure.kind) || attempt === attempts) throw err;
 
+      // A 4xx other than 429 is a deterministic rejection of the request as sent - an unsupported
+      // tool, a bad model name, a malformed body. Waiting changes nothing, and the caller has real
+      // recovery options (retry without grounding, split the request) that it should reach
+      // immediately instead of after several seconds of pointless backoff.
+      if (failure.status && failure.status >= 400 && failure.status < 500 && failure.status !== 429) {
+        throw err;
+      }
+
       const backoff = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs);
       const jitter = Math.floor(Math.random() * 400);
       const waitMs = Math.min(failure.retryAfterMs ?? backoff + jitter, maxDelayMs);
