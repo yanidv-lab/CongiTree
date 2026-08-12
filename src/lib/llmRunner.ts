@@ -17,14 +17,16 @@ import {
 // try before giving up lives here, so all three behave identically.
 //
 // The ladder, in order:
-//   1. One grounded single-shot call, with backoff retries for transient failures.
-//   2. Unless the key itself is the problem, the same call again with search grounding off.
-//   3. If it still fails on a *short-term* limit (or the response came back truncated), rebuild
-//      the same result from a small outline call plus spaced detail calls - see llmSplit.ts.
+//   1. One grounded single-shot call, with a short backoff retry for transient failures.
+//   2. The same call with search grounding off - when the tool itself looks like the problem.
+//      Skipped for a plain burst limit, where the same oversized request would fail again.
+//   3. Rebuild from a small outline call plus spaced detail calls (llmSplit.ts) - for burst
+//      limits and truncated responses, i.e. whenever "too much at once" is the real problem.
 //   4. Only then fall back to canned content, tagged with the real reason.
 //
 // Steps 2 and 3 are the difference between "your quota is gone, here is filler" and actually
-// getting the user's tree built.
+// getting the user's tree built. Each rung is cheap and bounded, because all of this happens
+// while someone watches a spinner.
 
 export interface RunResult {
   /** Set when canned fallback content was substituted for real model output. */
@@ -83,8 +85,18 @@ function worthSplitting(kind: FailureKind): boolean {
  * without the tool would have worked. One extra request is a cheap price for that.
  */
 function worthUngroundedRetry(kind: FailureKind): boolean {
-  return kind !== 'auth_error' && kind !== 'quota_exhausted' && kind !== 'server_key_missing';
+  // Failures about the key itself: a second call changes nothing.
+  if (kind === 'auth_error' || kind === 'quota_exhausted' || kind === 'server_key_missing') return false;
+  // A plain burst limit is about how much we asked for, not about the tool - the same oversized
+  // request without grounding is just as likely to be refused, and each doomed attempt is another
+  // wait the user sits through. Splitting is the right answer there, so go straight to it.
+  if (kind === 'rate_limit') return false;
+  return true;
 }
+
+// Attempts for the single big request. Deliberately low: when it fails there are better moves
+// than asking again for exactly the same thing, and every extra attempt is a visible delay.
+const SINGLE_SHOT_ATTEMPTS = 2;
 
 export async function runGenerateTree(
   callModel: ModelCaller,
@@ -94,7 +106,7 @@ export async function runGenerateTree(
   const prompt = buildGenerateTreePrompt(topic, language, depthLevel as any, customInstructions);
 
   const singleShot = async (grounded: boolean): Promise<LearningTree> => {
-    const text = await withBurstRetry(() => callModel(prompt, { grounded }), { attempts: 3 });
+    const text = await withBurstRetry(() => callModel(prompt, { grounded }), { attempts: SINGLE_SHOT_ATTEMPTS });
     let parsed: any;
     try {
       parsed = parseJsonFromModelText(text);
@@ -178,7 +190,7 @@ export async function runExpandNode(
   );
 
   const singleShot = async (grounded: boolean) => {
-    const text = await withBurstRetry(() => callModel(prompt, { grounded }), { attempts: 3 });
+    const text = await withBurstRetry(() => callModel(prompt, { grounded }), { attempts: SINGLE_SHOT_ATTEMPTS });
     let parsed: any;
     try {
       parsed = parseJsonFromModelText(text);

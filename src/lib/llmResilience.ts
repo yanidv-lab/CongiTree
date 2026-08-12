@@ -135,24 +135,48 @@ export function classifyFailure(err: any): ProviderFailure {
     return { kind: 'grounding_limit', status, retryAfterMs, detail };
   }
 
+  // Per-minute vs. per-day, decided from the STRUCTURED violation, never from the prose.
+  //
+  // This matters more than it looks. Gemini answers a plain per-minute rate limit with
+  //
+  //   "You exceeded your current quota, please check your plan and billing details.
+  //    For more information on this error, head to: .../docs/rate-limits"
+  //
+  // - wording that reads exactly like a spent quota and even says "billing", but is Google's
+  // generic 429 text and is used for the recoverable minute-level limit too. Matching on that
+  // prose labelled every free-tier burst limit "your quota is gone, waiting won't help", which is
+  // both false and the opposite of the right advice. The only reliable discriminator is the
+  // machine-readable quotaId / quotaMetric in error.details[].violations[].
+  const quotaIds = (haystackOf(err).match(/"quota(?:id|metric)"\s*:\s*"([^"]*)"/g) || []).join(' ');
+  if (quotaIds) {
+    if (/perday|per_day|daily/.test(quotaIds)) {
+      return { kind: 'quota_exhausted', status, retryAfterMs, detail };
+    }
+    if (/perminute|per_minute|persecond|per_second/.test(quotaIds)) {
+      return { kind: 'rate_limit', status, retryAfterMs, detail };
+    }
+  }
+
   // Hard limits - retrying in seconds will not help, so never tell the user to "try again shortly".
+  // Every entry here is a machine-readable code or a phrase a provider uses ONLY for a spent
+  // balance, never for a burst limit. Deliberately absent: bare "billing", "payment" and
+  // "exceeded your current quota", which Gemini emits for recoverable minute-level limits.
   const isHardQuota =
-    text.includes('insufficient_quota') ||                    // OpenAI: billing quota gone
-    text.includes('exceeded your current quota') ||           // OpenAI
+    text.includes('insufficient_quota') ||                    // OpenAI: billing quota gone (error code)
     text.includes('credit balance is too low') ||             // Anthropic: prepaid credits gone
-    text.includes('billing') || text.includes('payment') ||
-    text.includes('per day') || text.includes('perday') ||    // Gemini: daily free-tier cap
-    text.includes('per-day') || text.includes('requests_per_day') ||
-    text.includes('daily limit') || text.includes('quota_exceeded');
+    text.includes('billing_hard_limit_reached') ||            // OpenAI: spend cap hit
+    text.includes('requests_per_day') || text.includes('daily limit exceeded');
   if (isHardQuota) return { kind: 'quota_exhausted', status, retryAfterMs, detail };
 
-  // Everything else that looks like a limit is treated as a short-term burst limit, which is the
-  // recoverable interpretation - we retry and split rather than declaring the key dead.
+  // Everything else that looks like a limit is treated as a short-term burst limit, which is both
+  // the recoverable interpretation and the safer default: we retry and split rather than telling
+  // the user their key is spent. Being wrong this way costs a few extra seconds; being wrong the
+  // other way tells someone with plenty of quota left to go top up their billing.
   const isBurst =
     status === 429 ||
     text.includes('resource_exhausted') || text.includes('rate_limit') || text.includes('rate limit') ||
     text.includes('too many requests') || text.includes('per minute') || text.includes('perminute') ||
-    text.includes('overloaded');
+    text.includes('exceeded your current quota') || text.includes('overloaded');
   if (isBurst) return { kind: 'rate_limit', status, retryAfterMs, detail };
 
   return { kind: 'api_error', status, retryAfterMs, detail };
@@ -178,7 +202,12 @@ export interface BurstRetryOptions {
  * jitter, so several nodes expanding at once don't re-collide on the same second.
  */
 export async function withBurstRetry<T>(fn: () => Promise<T>, options: BurstRetryOptions = {}): Promise<T> {
-  const { attempts = 3, baseDelayMs = 1200, maxDelayMs = 30_000, onRetry } = options;
+  // maxDelayMs is capped well below what providers suggest on purpose. Gemini answers a free-tier
+  // minute limit with retryDelay: "27s", which is a conservative "you're definitely clear by now"
+  // figure - the 15 RPM bucket actually refills one slot every 4s. Honouring 27s at every rung
+  // would leave someone staring at a spinner for minutes, and the caller has better moves
+  // available (ungrounded retry, splitting the work into smaller spaced calls) than waiting.
+  const { attempts = 3, baseDelayMs = 1200, maxDelayMs = 10_000, onRetry } = options;
   let lastErr: any;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
@@ -216,7 +245,11 @@ export async function withBurstRetry<T>(fn: () => Promise<T>, options: BurstRetr
 export const SPLIT_CALL_SPACING_MS = 4000;
 
 export function spacingFor(failure: ProviderFailure | undefined): number {
+  // The provider's Retry-After answers "when am I definitely clear again?", but split calls need
+  // the *sustainable* rate instead - each one is small, and they only have to avoid re-tripping
+  // the same bucket. Free-tier Gemini's 15 RPM refills a slot every 4s, so an 8s ceiling leaves
+  // generous headroom while keeping a ten-node tree inside about a minute rather than five.
   const suggested = failure?.retryAfterMs;
-  if (suggested && suggested > SPLIT_CALL_SPACING_MS) return Math.min(suggested, 20_000);
+  if (suggested && suggested > SPLIT_CALL_SPACING_MS) return Math.min(suggested, 8_000);
   return SPLIT_CALL_SPACING_MS;
 }
