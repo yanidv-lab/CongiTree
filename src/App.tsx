@@ -47,8 +47,14 @@ import {
 // when the user had selected OpenAI or Anthropic. By the time this message is shown the app has
 // already retried, dropped search grounding, and rebuilt the request as several smaller ones, so
 // it can say honestly that the limit is a hard one.
-function fallbackReasonMessage(reason: string | undefined, language: 'he' | 'en', provider: string): string {
+function fallbackReasonMessage(reason: string | undefined, language: 'he' | 'en', provider: string, detail?: string): string {
   const isHe = language === 'he';
+  // For the generic buckets our own wording says nothing useful, so append the provider's own
+  // text. On a phone there is no console to read it from, and the real cause is often right there
+  // (an unsupported tool, a disabled API, a model name the key can't reach).
+  const suffix = detail && (reason === 'api_error' || reason === 'parse_error' || !reason)
+    ? `\n${isHe ? 'פירוט מהספק' : 'Provider said'}: ${detail}`
+    : '';
   switch (reason) {
     case 'rate_limit':
       return isHe
@@ -71,13 +77,13 @@ function fallbackReasonMessage(reason: string | undefined, language: 'he' | 'en'
         ? 'בשרת לא מוגדר מפתח API. יש להזין מפתח אישי בהגדרות.'
         : 'The server has no API key configured. Enter your own key in Settings.';
     case 'parse_error':
-      return isHe
+      return (isHe
         ? 'לא התקבלה תגובה תקינה מהבינה המלאכותית, גם אחרי ניסיון בבקשות קטנות יותר.'
-        : "Didn't get a valid response from the AI, even after retrying as smaller requests.";
+        : "Didn't get a valid response from the AI, even after retrying as smaller requests.") + suffix;
     default:
-      return isHe
+      return (isHe
         ? 'אירעה שגיאה בפנייה לבינה המלאכותית.'
-        : 'Something went wrong contacting the AI.';
+        : 'Something went wrong contacting the AI.') + suffix;
   }
 }
 
@@ -257,8 +263,8 @@ export default function App() {
     setTimeout(() => setToastMessage(null), durationMs);
   };
 
-  const showFailureToast = (reason: string | undefined) =>
-    showToast(fallbackReasonMessage(reason, language, providerLabel), 8000);
+  const showFailureToast = (reason: string | undefined, detail?: string) =>
+    showToast(fallbackReasonMessage(reason, language, providerLabel, detail), 8000);
 
   // Helper to update current active tree and save
   const updateCurrentTree = (mutator: (tree: LearningTree) => LearningTree) => {
@@ -410,12 +416,13 @@ export default function App() {
     try {
       let rawTree: LearningTree;
       let fallbackReason: string | undefined;
+      let fallbackDetail: string | undefined;
       let isPartial = false;
 
       try {
         const data = await callBackend('/api/generate-tree', { topic, language, depthLevel, customInstructions });
         rawTree = updateTreeCompletionStatus(data.tree);
-        if (data.isFallback) fallbackReason = data.fallbackReason;
+        if (data.isFallback) { fallbackReason = data.fallbackReason; fallbackDetail = data.fallbackDetail; }
         if (data.isPartial) isPartial = true;
       } catch (serverErr) {
         // A malformed request fails the same way anywhere, so surface it as-is. Every other
@@ -457,7 +464,7 @@ export default function App() {
       // fallback tree was substituted - tell the user explicitly instead of letting them think
       // this basic tree IS the real AI-researched result.
       if (fallbackReason) {
-        showFailureToast(fallbackReason);
+        showFailureToast(fallbackReason, fallbackDetail);
       } else if (isPartial) {
         showToast(partialResultMessage(language), 8000);
       }
@@ -588,7 +595,7 @@ export default function App() {
       // several smaller ones. That is an API problem, NOT a finding that the topic has nothing
       // left to teach, so the node must not be marked exhausted here.
       if (data.isFallback) {
-        showFailureToast(data.fallbackReason);
+        showFailureToast(data.fallbackReason, data.fallbackDetail);
         return;
       }
 
